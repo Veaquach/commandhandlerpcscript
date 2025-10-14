@@ -1,4 +1,4 @@
--- Nullen Hub - too pro digger (with anti-fling return, view/unview, instant TP SkidFling)
+-- Nullen Hub - too pro digger
 
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -944,3 +944,4 @@ local function HookChat()
 end
 
 HookChat()
+
