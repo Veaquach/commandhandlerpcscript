@@ -1,4 +1,4 @@
--- Nullen Hub - too pro digger (with anti-fling return, instant TP SkidFling)
+pro Nullen command handler with whitelist players(other players can use commands if you .wl them)
 
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -44,9 +44,14 @@ local processedMessages = {}
 
 -- === UTILITY FUNCTIONS ===
 local function Message(title, text, duration)
-    pcall(function()
+    local success, err = pcall(function()
         StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = duration or 3})
     end)
+    if not success then
+        print("[NullenHub Notification Failed] Title: " .. tostring(title) .. ", Text: " .. tostring(text) .. ", Error: " .. tostring(err))
+    else
+        print("[NullenHub Notification] Title: " .. tostring(title) .. ", Text: " .. tostring(text))
+    end
 end
 
 local function FindPlayer(query)
@@ -98,19 +103,26 @@ local function OpenTextbox()
             textBox.Text = ""
         end
     end)
+    Message("Textbox", "Textbox opened. Type commands here!", 2)
 end
 
 local function CloseTextbox()
     local screenGui = game:GetService("CoreGui"):FindFirstChild("NullenHubTextbox")
     if screenGui then
         screenGui:Destroy()
+        Message("Textbox", "Textbox closed.", 2)
+    else
+        Message("Textbox", "No textbox found to close.", 2)
     end
 end
 
 local function StopVelocity(duration)
     if StopVelConn then StopVelConn:Disconnect() end
     local root, hum = getCharacterHumanoid()
-    if not root or not hum then return end
+    if not root or not hum then
+        Message("StopVel", "No character found.", 2)
+        return
+    end
     StopVelConn = RunService.Heartbeat:Connect(function()
         pcall(function()
             root.Velocity = Vector3.new(0, 0, 0)
@@ -132,6 +144,9 @@ local function CancelStopVelocity()
     if StopVelConn then
         StopVelConn:Disconnect()
         StopVelConn = nil
+        Message("StopVel", "Cancelled velocity stop.", 2)
+    else
+        Message("StopVel", "No active velocity stop to cancel.", 2)
     end
 end
 
@@ -156,38 +171,90 @@ local function ApplyConfig(cfg)
 end
 
 local function SkidFlingWithSafeReturn(target)
-    local root, hum = getCharacterHumanoid()
-    if not root or not hum then return end
-    local targetRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
-    if not targetRoot then return end
-    getgenv().FlingActive = true
+    local char = Player.Character
+    if not char or not char.PrimaryPart then
+        Message("Fling", "No character found.", 2)
+        return
+    end
+    local root = char.PrimaryPart
     local originalPos = root.CFrame
+
+    local targetChar = target.Character
+    if not targetChar or not targetChar.PrimaryPart then
+        Message("Fling", "Target character not found.", 2)
+        return
+    end
+    local targetRoot = targetChar.PrimaryPart
+    local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+    if not targetHum then
+        Message("Fling", "Target humanoid not found.", 2)
+        return
+    end
+
+    -- Instantly teleport to target ONCE before starting fling
+    root.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 2)
+
+    -- Create fling physics
     local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bv.Velocity = targetRoot.CFrame.lookVector * getgenv().FlingPower
+    bv.MaxForce = Vector3.new(getgenv().FlingForce, getgenv().FlingForce, getgenv().FlingForce)
+    bv.P = getgenv().FlingPower
+    bv.Velocity = Vector3.new(0, 0, 0)
     bv.Parent = root
-    local spin = Instance.new("BodyAngularVelocity")
-    spin.MaxTorque = Vector3.new(0, getgenv().FlingSpin, 0)
-    spin.AngularVelocity = Vector3.new(0, getgenv().FlingForce, 0)
-    spin.Parent = root
-    task.spawn(function()
-        task.wait(0.5)
-        pcall(function()
-            bv:Destroy()
-            spin:Destroy()
-            root.CFrame = originalPos
-            root.Velocity = Vector3.new(0, 0, 0)
-            if root.AssemblyLinearVelocity then
-                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+
+    local bav = Instance.new("BodyAngularVelocity")
+    bav.MaxTorque = Vector3.new(getgenv().FlingForce, getgenv().FlingForce, getgenv().FlingForce)
+    bav.AngularVelocity = Vector3.new(getgenv().FlingSpin, getgenv().FlingSpin, getgenv().FlingSpin)
+    bav.Parent = root
+
+    getgenv().FlingActive = true
+
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if not getgenv().FlingActive or not target or not target.Parent then
+            bv:Destroy(); bav:Destroy(); conn:Disconnect(); return
+        end
+
+        if targetHum.Health <= 0 or targetRoot.Velocity.Magnitude > VelocityThreshold then
+            getgenv().FlingActive = false
+        end
+
+        bav.AngularVelocity = Vector3.new(getgenv().FlingSpin, getgenv().FlingSpin, getgenv().FlingSpin)
+
+        -- ORIGINAL TWEEN-LIKE FLING LOGIC
+        local predictionTime = math.clamp(targetRoot.Velocity.Magnitude / 200, 0.1, 0.5)
+        local predictedPos = targetRoot.Position + targetRoot.Velocity * predictionTime
+        local offset = targetHum.MoveDirection.Magnitude > 0 and targetHum.MoveDirection.Unit * 3 or Vector3.new(0, 0, 0)
+        local direction = (predictedPos + offset - root.Position).Unit
+        bv.Velocity = direction * getgenv().FlingPower
+    end)
+
+    -- SAFE RETURN: teleport back gradually until velocity is near zero
+    spawn(function()
+        repeat task.wait(0.03) until not getgenv().FlingActive
+
+        if root and root.Parent then
+            local VELOCITY_THRESHOLD = 5 -- studs/sec, considered "stopped"
+            while root.Parent and root.AssemblyLinearVelocity.Magnitude > VELOCITY_THRESHOLD do
+                pcall(function()
+                    root.CFrame = originalPos
+                    root.Velocity = Vector3.new(0, 0, 0)
+                end)
+                task.wait(0.03)
             end
-        end)
-        getgenv().FlingActive = false
+        end
+
+        bv:Destroy()
+        bav:Destroy()
+        if conn then conn:Disconnect() end
     end)
 end
 
 local function StartWalkFling()
     local root, hum = getCharacterHumanoid()
-    if not root or not hum then return end
+    if not root or not hum then
+        Message("WalkFling", "No character found.", 2)
+        return
+    end
     getgenv().FlingActive = true
     local bv = Instance.new("BodyVelocity")
     bv.MaxForce = Vector3.new(math.huge, 0, math.huge)
@@ -211,82 +278,14 @@ local function StopWalkFling()
     end
 end
 
--- SKID FLING (INSTA-TP VERSION) WITH SAFE RETURN & ANTI-FLING RETURN LOOP
-local function SkidFlingWithSafeReturn(TargetPlayer)
-    local char = Player.Character
-    if not char or not char.PrimaryPart then return end
-    local root = char.PrimaryPart
-    local OriginalPos = root.CFrame
-
-    local targetChar = TargetPlayer.Character
-    if not targetChar or not targetChar.PrimaryPart then return end
-    local targetRoot = targetChar.PrimaryPart
-    local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
-    if not targetHum then return end
-
-    -- Instantly teleport to target ONCE before starting fling
-    root.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 2)
-
-    -- create fling physics
-    local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(getgenv().FlingForce,getgenv().FlingForce,getgenv().FlingForce)
-    bv.P = getgenv().FlingPower
-    bv.Velocity = Vector3.new(0,0,0)
-    bv.Parent = root
-
-    local bav = Instance.new("BodyAngularVelocity")
-    bav.MaxTorque = Vector3.new(getgenv().FlingForce,getgenv().FlingForce,getgenv().FlingForce)
-    bav.AngularVelocity = Vector3.new(getgenv().FlingSpin,getgenv().FlingSpin,getgenv().FlingSpin)
-    bav.Parent = root
-
-    getgenv().FlingActive = true
-
-    local conn
-    conn = RunService.Heartbeat:Connect(function()
-        if not getgenv().FlingActive or not TargetPlayer or not TargetPlayer.Parent then
-            bv:Destroy(); bav:Destroy(); conn:Disconnect(); return
-        end
-
-        if targetHum.Health <= 0 or targetRoot.Velocity.Magnitude > VelocityThreshold then
-            getgenv().FlingActive = false
-        end
-
-        bav.AngularVelocity = Vector3.new(getgenv().FlingSpin,getgenv().FlingSpin,getgenv().FlingSpin)
-
-        -- ORIGINAL TWEEN-LIKE FLING LOGIC
-        local predictionTime = math.clamp(targetRoot.Velocity.Magnitude / 200, 0.1, 0.5)
-        local predictedPos = targetRoot.Position + targetRoot.Velocity * predictionTime
-        local offset = targetHum.MoveDirection.Magnitude>0 and targetHum.MoveDirection.Unit*3 or Vector3.new(0,0,0)
-        local direction = (predictedPos + offset - root.Position).Unit
-        bv.Velocity = direction * getgenv().FlingPower
-    end)
-
-    -- SAFE RETURN: teleport back gradually until velocity is near zero
-    spawn(function()
-        repeat task.wait(0.03) until not getgenv().FlingActive
-
-        if root and root.Parent then
-            local VELOCITY_THRESHOLD = 5 -- studs/sec, considered "stopped"
-            while root.Parent and root.AssemblyLinearVelocity.Magnitude > VELOCITY_THRESHOLD do
-                pcall(function()
-                    root.CFrame = OriginalPos
-                    root.Velocity = Vector3.new(0,0,0)
-                end)
-                task.wait(0.03)
-            end
-        end
-
-        bv:Destroy()
-        bav:Destroy()
-        if conn then conn:Disconnect() end
-    end)
-end
-
 local function EnableInstaRespawn()
     if charAddedConn then charAddedConn:Disconnect() end
     if charRemovingConn then charRemovingConn:Disconnect() end
     local root, hum = getCharacterHumanoid()
-    if not root or not hum then return end
+    if not root or not hum then
+        Message("InstaRespawn", "No character found.", 2)
+        return
+    end
     lastRespawnPos = root.CFrame
     charRemovingConn = Player.CharacterRemoving:Connect(function()
         lastRespawnPos = root.CFrame
@@ -298,6 +297,7 @@ local function EnableInstaRespawn()
             pcall(function() newRoot.CFrame = lastRespawnPos end)
         end
     end)
+    Message("InstaRespawn", "Enabled instant respawn.", 2)
 end
 
 local function DisableInstaRespawn()
@@ -306,12 +306,9 @@ local function DisableInstaRespawn()
     charRemovingConn = nil
     charAddedConn = nil
     lastRespawnPos = nil
+    Message("InstaRespawn", "Disabled instant respawn.", 2)
 end
 
-local AntiVoidConn
-local lastSafeCFrame = nil
-local AntiVoidEnabled = false
-local VOID_CHECK_Y = (workspace and workspace.FallenPartsDestroyHeight) or -100
 local function startAntiVoid()
     if AntiVoidConn then return end
     AntiVoidConn = RunService.Heartbeat:Connect(function()
@@ -340,13 +337,14 @@ local function startAntiVoid()
             else
                 local spawn = workspace:FindFirstChildOfClass("SpawnLocation") or workspace:FindFirstChild("SpawnLocation")
                 if spawn and spawn:IsA("BasePart") then
-                    pcall(function() hrp.CFrame = spawn.CFrame + Vector3.new(0,5,0) end)
+                    pcall(function() hrp.CFrame = spawn.CFrame + Vector3.new(0, 5, 0) end)
                 end
             end
             task.wait(0.2)
         end
     end)
 end
+
 local function stopAntiVoid()
     if AntiVoidConn then
         AntiVoidConn:Disconnect()
@@ -355,17 +353,24 @@ local function stopAntiVoid()
 end
 
 function EnableAntiVoid()
-    if AntiVoidEnabled then return end
+    if AntiVoidEnabled then
+        Message("AntiVoid", "Anti-void already enabled.", 2)
+        return
+    end
     AntiVoidEnabled = true
     VOID_CHECK_Y = (workspace and workspace.FallenPartsDestroyHeight) or -100
     startAntiVoid()
-    Message("AntiVoid", "Enabled anti-void rescue", 2)
+    Message("AntiVoid", "Enabled anti-void rescue.", 2)
 end
+
 function DisableAntiVoid()
-    if not AntiVoidEnabled then return end
+    if not AntiVoidEnabled then
+        Message("AntiVoid", "Anti-void already disabled.", 2)
+        return
+    end
     AntiVoidEnabled = false
     stopAntiVoid()
-    Message("AntiVoid", "Disabled anti-void rescue", 2)
+    Message("AntiVoid", "Disabled anti-void rescue.", 2)
 end
 
 local function EnableAntiFallDamage()
@@ -373,7 +378,10 @@ local function EnableAntiFallDamage()
     if AntiFallDamageConns[2] then AntiFallDamageConns[2]:Disconnect() end
     AntiFallDamageActive = true
     local root, hum = getCharacterHumanoid()
-    if not root or not hum then return end
+    if not root or not hum then
+        Message("AntiFallDamage", "No character found.", 2)
+        return
+    end
     AntiFallDamageConns[1] = hum.StateChanged:Connect(function(old, new)
         if new == Enum.HumanoidStateType.FallingDown or new == Enum.HumanoidStateType.Ragdoll then
             hum:ChangeState(Enum.HumanoidStateType.Running)
@@ -389,6 +397,7 @@ local function EnableAntiFallDamage()
             end)
         end
     end)
+    Message("AntiFallDamage", "Enabled anti-fall damage.", 2)
 end
 
 local function DisableAntiFallDamage()
@@ -397,103 +406,107 @@ local function DisableAntiFallDamage()
     end
     AntiFallDamageConns = {}
     AntiFallDamageActive = false
+    Message("AntiFallDamage", "Disabled anti-fall damage.", 2)
 end
 
 local function EnableNoDamage()
     if NoDamageConn then NoDamageConn:Disconnect() end
     local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
+    if not hum then
+        Message("NoDamage", "No humanoid found.", 2)
+        return
+    end
     NoDamageConn = hum:GetPropertyChangedSignal("Health"):Connect(function()
         pcall(function() hum.Health = hum.MaxHealth end)
     end)
+    Message("NoDamage", "Enabled no damage.", 2)
 end
 
 local function DisableNoDamage()
     if NoDamageConn then NoDamageConn:Disconnect() end
     NoDamageConn = nil
+    Message("NoDamage", "Disabled no damage.", 2)
 end
 
-local Flying = false
-local ctrl = {f=0,b=0,l=0,r=0,u=0,d=0}
-local bv,bg,flyConn,hum
-
-UserInputService.InputBegan:Connect(function(input,processed)
+UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
     local kc = input.KeyCode
-    if kc==Enum.KeyCode.W then ctrl.f=1 end
-    if kc==Enum.KeyCode.S then ctrl.b=1 end
-    if kc==Enum.KeyCode.A then ctrl.l=1 end
-    if kc==Enum.KeyCode.D then ctrl.r=1 end
-    if kc==Enum.KeyCode.Space then ctrl.u=1 end
-    if kc==Enum.KeyCode.E then ctrl.d=1 end
+    if kc == Enum.KeyCode.W then ctrl.f = 1 end
+    if kc == Enum.KeyCode.S then ctrl.b = 1 end
+    if kc == Enum.KeyCode.A then ctrl.l = 1 end
+    if kc == Enum.KeyCode.D then ctrl.r = 1 end
+    if kc == Enum.KeyCode.Space then ctrl.u = 1 end
+    if kc == Enum.KeyCode.E then ctrl.d = 1 end
 end)
+
 UserInputService.InputEnded:Connect(function(input)
-    local kc=input.KeyCode
-    if kc==Enum.KeyCode.W then ctrl.f=0 end
-    if kc==Enum.KeyCode.S then ctrl.b=0 end
-    if kc==Enum.KeyCode.A then ctrl.l=0 end
-    if kc==Enum.KeyCode.D then ctrl.r=0 end
-    if kc==Enum.KeyCode.Space then ctrl.u=0 end
-    if kc==Enum.KeyCode.E then ctrl.d=0 end
+    local kc = input.KeyCode
+    if kc == Enum.KeyCode.W then ctrl.f = 0 end
+    if kc == Enum.KeyCode.S then ctrl.b = 0 end
+    if kc == Enum.KeyCode.A then ctrl.l = 0 end
+    if kc == Enum.KeyCode.D then ctrl.r = 0 end
+    if kc == Enum.KeyCode.Space then ctrl.u = 0 end
+    if kc == Enum.KeyCode.E then ctrl.d = 0 end
 end)
-
-local function safeDestroy(obj)
-    if obj and typeof(obj)=="Instance" then pcall(function() obj:Destroy() end) end
-end
-
-local function getCharacterHumanoid()
-    local char = Player.Character or Player.CharacterAdded:Wait()
-    local root = char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart",5)
-    local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid",5)
-    return root,hum
-end
 
 function StartFly(speed)
-    if Flying then return end
-    Flying=true
+    if Flying then
+        Message("Fly", "Already flying.", 2)
+        return
+    end
+    Flying = true
     getgenv().FlySpeed = tonumber(speed) or getgenv().FlySpeed or 85
-    local hrp,curHum = getCharacterHumanoid()
+    local hrp, curHum = getCharacterHumanoid()
     hum = curHum
-    if not hrp or not hum then Flying=false return end
+    if not hrp or not hum then
+        Flying = false
+        Message("Fly", "No character found.", 2)
+        return
+    end
     hum.PlatformStand = true
     safeDestroy(bv); safeDestroy(bg)
     if flyConn then flyConn:Disconnect() end
     bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(1e6,1e6,1e6)
-    bv.Velocity = Vector3.new(0,0,0)
+    bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+    bv.Velocity = Vector3.new(0, 0, 0)
     bv.Parent = hrp
     bg = Instance.new("BodyGyro")
-    bg.MaxTorque = Vector3.new(9e5,9e5,9e5)
+    bg.MaxTorque = Vector3.new(9e5, 9e5, 9e5)
     bg.CFrame = hrp.CFrame
     bg.Parent = hrp
     flyConn = RunService.RenderStepped:Connect(function()
         if not Flying then return end
-        local move = Vector3.new(ctrl.r-ctrl.l,ctrl.u-ctrl.d,ctrl.b-ctrl.f)
-        if move.Magnitude>0 then
+        local move = Vector3.new(ctrl.r - ctrl.l, ctrl.u - ctrl.d, ctrl.b - ctrl.f)
+        if move.Magnitude > 0 then
             local cam = Workspace.CurrentCamera
-            bv.Velocity = cam.CFrame:VectorToWorldSpace(move.Unit*(getgenv().FlySpeed or 85))
+            bv.Velocity = cam.CFrame:VectorToWorldSpace(move.Unit * (getgenv().FlySpeed or 85))
         else
-            bv.Velocity=Vector3.new(0,0,0)
+            bv.Velocity = Vector3.new(0, 0, 0)
         end
         bg.CFrame = Workspace.CurrentCamera.CFrame
     end)
+    Message("Fly", "Enabled fly.", 2)
 end
+
 function StopFly()
-    if flyConn then flyConn:Disconnect() flyConn=nil end
-    safeDestroy(bv); safeDestroy(bg); bv=nil; bg=nil
+    if flyConn then flyConn:Disconnect() flyConn = nil end
+    safeDestroy(bv); safeDestroy(bg); bv = nil; bg = nil
     local char = Player.Character
     if char then
         local currentHum = char:FindFirstChildOfClass("Humanoid")
         if currentHum then currentHum.PlatformStand = false end
     end
-    hum=nil
-    Flying=false
-    ctrl={f=0,b=0,l=0,r=0,u=0,d=0}
+    hum = nil
+    Flying = false
+    ctrl = {f = 0, b = 0, l = 0, r = 0, u = 0, d = 0}
+    Message("Fly", "Disabled fly.", 2)
 end
 
-local SpinConn
 function EnableSpin(speed)
-    if SpinConn then return end
+    if SpinConn then
+        Message("Spin", "Already spinning.", 2)
+        return
+    end
     speed = tonumber(speed) or 10
     SpinConn = RunService.Heartbeat:Connect(function()
         if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
@@ -502,15 +515,24 @@ function EnableSpin(speed)
     end)
     Message("Spin", "Spinning enabled.", 2)
 end
+
 function DisableSpin()
-    if SpinConn then SpinConn:Disconnect() SpinConn = nil end
-    Message("Spin", "Spinning disabled.", 2)
+    if SpinConn then
+        SpinConn:Disconnect()
+        SpinConn = nil
+        Message("Spin", "Spinning disabled.", 2)
+    else
+        Message("Spin", "Not spinning.", 2)
+    end
 end
 
 local function LoopGoto(target)
     if loopGotoConn then loopGotoConn:Disconnect() end
     local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-    if not root or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then return end
+    if not root or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
+        Message("LoopGoto", "No character or target found.", 2)
+        return
+    end
     loopGotoConn = RunService.Heartbeat:Connect(function()
         if target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
             pcall(function()
@@ -524,12 +546,20 @@ local function LoopGoto(target)
 end
 
 local function StopLoopGoto()
-    if loopGotoConn then loopGotoConn:Disconnect() end
-    loopGotoConn = nil
+    if loopGotoConn then
+        loopGotoConn:Disconnect()
+        loopGotoConn = nil
+        Message("LoopGoto", "Stopped loopgoto.", 2)
+    else
+        Message("LoopGoto", "No active loopgoto to stop.", 2)
+    end
 end
 
 local function EnableNoclip()
-    if NoclipConn then NoclipConn:Disconnect() end
+    if NoclipConn then
+        Message("Noclip", "Noclip already enabled.", 2)
+        return
+    end
     NoclipConn = RunService.Stepped:Connect(function()
         local char = Player.Character
         if char then
@@ -540,11 +570,17 @@ local function EnableNoclip()
             end
         end
     end)
+    Message("Noclip", "Enabled noclip.", 2)
 end
 
 local function DisableNoclip()
-    if NoclipConn then NoclipConn:Disconnect() end
-    NoclipConn = nil
+    if NoclipConn then
+        NoclipConn:Disconnect()
+        NoclipConn = nil
+        Message("Noclip", "Disabled noclip.", 2)
+    else
+        Message("Noclip", "Noclip already disabled.", 2)
+    end
 end
 
 local function CmdStatus()
@@ -581,11 +617,9 @@ function HandleChat(p, msg, showNotifications)
 
     -- Only process messages starting with "." for command checks
     if msg:sub(1, 1) == "." then
-        -- Show permission denied notification for non-whitelisted players (except local player)
+        -- Show permission denied for non-whitelisted players (except local player)
         if not getgenv().Whitelisted[p.Name] and p ~= Player then
-            if showNotifications then
-                Message("Nullen Hub", "You do not have permission to use this command.", 3)
-            end
+            Message("Nullen Hub", "You do not have permission to use this command.", 3)
             return
         end
     else
@@ -603,16 +637,10 @@ function HandleChat(p, msg, showNotifications)
 
     if cmd == ".textbox" then
         OpenTextbox()
-        if showNotifications then
-            Message("Textbox", "Textbox opened. Type commands here!", 2)
-        end
         return
     end
     if cmd == ".untextbox" then
         CloseTextbox()
-        if showNotifications then
-            Message("Textbox", "Textbox closed.", 2)
-        end
         return
     end
 
@@ -622,13 +650,9 @@ function HandleChat(p, msg, showNotifications)
         local jobId = input:match("gameInstanceId=([%w%-]+)") or input:match("jobId=([%w%-]+)")
         if placeId and jobId then
             pcall(function() TeleportService:TeleportToPlaceInstance(placeId, jobId, Player) end)
-            if showNotifications then
-                Message("Join", "Teleporting to Job "..jobId, 3)
-            end
+            Message("Join", "Teleporting to Job " .. jobId, 3)
         else
-            if showNotifications then
-                Message("Join", "Invalid link format! Use roblox://placeId=123&gameInstanceId=abc", 5)
-            end
+            Message("Join", "Invalid link format! Use roblox://placeId=123&gameInstanceId=abc", 5)
         end
         return
     end
@@ -636,9 +660,7 @@ function HandleChat(p, msg, showNotifications)
     if cmd == ".stopvel" or cmd == ".stopvelocity" or cmd == ".breakvelocity" or cmd == ".0velocity" then
         local dur = tonumber(args[2]) or 0.7
         StopVelocity(dur)
-        if showNotifications then
-            Message("StopVel", "Stopped velocity for " .. tostring(dur) .. "s", 2)
-        end
+        Message("StopVel", "Stopped velocity for " .. tostring(dur) .. "s.", 2)
         return
     end
     if cmd == ".cancelvel" then
@@ -650,25 +672,19 @@ function HandleChat(p, msg, showNotifications)
         local name = args[2]:lower()
         local cfg = getgenv().Configs[name]
         if not cfg and type(getclipboard) == "function" then
-            local text = getclipboard()
+            local text = getclipboard and getclipboard() or ""
             local success, loaded = pcall(function() return game:GetService("HttpService"):JSONDecode(text:match("return%s+(.+)")) end)
             if success and loaded then
                 cfg = loaded
                 getgenv().Configs[name] = cfg
-                if showNotifications then
-                    Message("Config", "Config '"..name.."' loaded from clipboard!", 3)
-                end
+                Message("Config", "Config '" .. name .. "' loaded from clipboard!", 3)
             end
         end
         if cfg then
             ApplyConfig(cfg)
-            if showNotifications then
-                Message("Config", "Config '"..name.."' applied!", 3)
-            end
+            Message("Config", "Config '" .. name .. "' applied!", 3)
         else
-            if showNotifications then
-                Message("Config", "Config '"..name.."' not found!", 2)
-            end
+            Message("Config", "Config '" .. name .. "' not found!", 2)
         end
         return
     end
@@ -677,13 +693,9 @@ function HandleChat(p, msg, showNotifications)
         local target = FindPlayer(args[2])
         if target then
             getgenv().LoveList[target.Name:lower()] = true
-            if showNotifications then
-                Message("Love", target.DisplayName .. " added to your LoveList ❤️", 3)
-            end
+            Message("Love", target.DisplayName .. " added to your LoveList ❤️", 3)
         else
-            if showNotifications then
-                Message("Love", "Player '" .. args[2] .. "' not found!", 3)
-            end
+            Message("Love", "Player '" .. args[2] .. "' not found!", 3)
         end
         return
     end
@@ -693,25 +705,22 @@ function HandleChat(p, msg, showNotifications)
         local name = args[2]:lower()
         if getgenv().LoveList[name] then
             getgenv().LoveList[name] = nil
-            if showNotifications then
-                Message("Love", (target and target.DisplayName or name) .. " removed from your LoveList 💔", 3)
-            end
+            Message("Love", (target and target.DisplayName or name) .. " removed from your LoveList 💔", 3)
         else
-            if showNotifications then
-                Message("Love", "Player '" .. name .. "' is not in your LoveList!", 3)
-            end
+            Message("Love", "Player '" .. name .. "' is not in your LoveList!", 3)
         end
         return
     end
 
     if cmd == ".kiss" then
         if p == Player then
-            if showNotifications then
-                Message("Love", "You can't kiss yourself!", 2)
-            end
+            Message("Love", "You can't kiss yourself!", 2)
             return
         end
-        if getgenv().KissActive then return end
+        if getgenv().KissActive then
+            Message("Love", "Kiss already active!", 2)
+            return
+        end
         local myChar = Player.Character
         local theirChar = p.Character
         if myChar and theirChar then
@@ -728,7 +737,7 @@ function HandleChat(p, msg, showNotifications)
                 getgenv().KissOriginalJumpPower = myHum.JumpPower
                 local originalAnchored = myRoot.Anchored
                 local kissStartTime = tick()
-                local kissDuration = 2.2
+                local kissDuration = 1.66
                 local moveDuration = 0.5
                 local initialWait = 0.2
                 myHum.WalkSpeed = 0
@@ -775,9 +784,7 @@ function HandleChat(p, msg, showNotifications)
                                 getgenv().KissOriginalJumpPower = nil
                             end)
                         end
-                        if showNotifications and getgenv().KissActive then
-                            Message("Love", "Kiss ended! 💋", 2)
-                        end
+                        Message("Love", "Kiss ended! 💋", 2)
                         getgenv().KissActive = false
                         return
                     end
@@ -804,9 +811,7 @@ function HandleChat(p, msg, showNotifications)
                                 getgenv().KissOriginalJumpPower = nil
                             end)
                         end
-                        if showNotifications then
-                            Message("Love", "Kiss ended! 💋", 2)
-                        end
+                        Message("Love", "Kiss ended! 💋", 2)
                         getgenv().KissActive = false
                         return
                     end
@@ -835,19 +840,13 @@ function HandleChat(p, msg, showNotifications)
                         end
                     end)
                 end)
-                if showNotifications and getgenv().KissActive then
-                    Message("Love", p.DisplayName .. " kissed you! 💋😘", 3)
-                end
+                Message("Love", p.DisplayName .. " kissed you! 💋😘", 3)
             else
-                if showNotifications then
-                    Message("Love", "Missing character parts!", 2)
-                end
+                Message("Love", "Missing character parts!", 2)
                 getgenv().KissActive = false
             end
         else
-            if showNotifications then
-                Message("Love", "Character not found!", 2)
-            end
+            Message("Love", "Character not found!", 2)
             getgenv().KissActive = false
         end
         return
@@ -880,10 +879,12 @@ function HandleChat(p, msg, showNotifications)
                     getgenv().KissOriginalWalkSpeed = nil
                     getgenv().KissOriginalJumpPower = nil
                 end)
+                Message("Love", "Kiss stopped! 💔", 2)
+            else
+                Message("Love", "No character found to stop kiss.", 2)
             end
-        end
-        if showNotifications then
-            Message("Love", "Kiss stopped! 💔", 2)
+        else
+            Message("Love", "No character found to stop kiss.", 2)
         end
         getgenv().KissActive = false
         return
@@ -893,13 +894,9 @@ function HandleChat(p, msg, showNotifications)
         local myHum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
         if myHum then
             myHum.Health = 0
-            if showNotifications then
-                Message("Love", p.DisplayName .. " playfully punished you! 💥", 3)
-            end
+            Message("Love", p.DisplayName .. " playfully punished you! 💥", 3)
         else
-            if showNotifications then
-                Message("Love", "Couldn't reset (no humanoid found).", 2)
-            end
+            Message("Love", "Couldn't reset (no humanoid found).", 2)
         end
         return
     end
@@ -919,13 +916,9 @@ function HandleChat(p, msg, showNotifications)
         getgenv().Configs[name] = cfg
         if type(setclipboard) == "function" then
             setclipboard("return " .. game:GetService("HttpService"):JSONEncode(cfg))
-            if showNotifications then
-                Message("Config", "Config '"..name.."' saved and copied to clipboard!", 3)
-            end
+            Message("Config", "Config '" .. name .. "' saved and copied to clipboard!", 3)
         else
-            if showNotifications then
-                Message("Config", "Config '"..name.."' saved locally!", 3)
-            end
+            Message("Config", "Config '" .. name .. "' saved locally!", 3)
         end
         return
     end
@@ -933,9 +926,7 @@ function HandleChat(p, msg, showNotifications)
     if cmd == ".listconfigs" then
         local names = {}
         for k in pairs(getgenv().Configs) do table.insert(names, k) end
-        if showNotifications then
-            Message("Configs", "Configs: " .. table.concat(names, ", "), 5)
-        end
+        Message("Configs", "Configs: " .. table.concat(names, ", "), 5)
         return
     end
 
@@ -961,67 +952,67 @@ function HandleChat(p, msg, showNotifications)
         local targetName = args[2]
         local target
         if targetName == "all" then
+            local flungCount = 0
             for _, plr in ipairs(Players:GetPlayers()) do
-                if plr ~= Player then SkidFlingWithSafeReturn(plr) end
+                if plr ~= Player then 
+                    SkidFlingWithSafeReturn(plr)
+                    flungCount = flungCount + 1
+                end
             end
+            Message("Fling", "Flung " .. flungCount .. " players.", 2)
         elseif targetName == "random" then
             local list = {}
-            for _, plr in ipairs(Players:GetPlayers()) do if plr ~= Player then table.insert(list, plr) end end
+            for _, plr in ipairs(Players:GetPlayers()) do 
+                if plr ~= Player then table.insert(list, plr) end 
+            end
             target = list[math.random(#list)]
-            if target then SkidFlingWithSafeReturn(target) end
+            if target then 
+                SkidFlingWithSafeReturn(target)
+                Message("Fling", "Flung random player: " .. target.DisplayName, 2)
+            else
+                Message("Fling", "No valid players found.", 2)
+            end
         else
             target = FindPlayer(targetName)
-            if target then SkidFlingWithSafeReturn(target)
+            if target then 
+                SkidFlingWithSafeReturn(target)
+                Message("Fling", "Flung " .. target.DisplayName, 2)
             else
-                if showNotifications then
-                    Message("Fling", "Target not found", 2)
-                end
+                Message("Fling", "Target '" .. targetName .. "' not found.", 2)
             end
         end
         return
     elseif cmd == ".unfling" then
         getgenv().FlingActive = false
-        if showNotifications then
-            Message("Fling", "Fling stopped", 2)
-        end
+        Message("Fling", "Fling stopped.", 2)
         return
     end
 
     if cmd == ".flingforce" and args[2] then
         getgenv().FlingForce = tonumber(args[2])
-        if showNotifications then
-            Message("FlingForce", "Current: "..getgenv().FlingForce, 2)
-        end
+        Message("FlingForce", "Set to " .. getgenv().FlingForce, 2)
         return
     end
     if cmd == ".flingspin" and args[2] then
         getgenv().FlingSpin = tonumber(args[2])
-        if showNotifications then
-            Message("FlingSpin", "Current: "..getgenv().FlingSpin, 2)
-        end
+        Message("FlingSpin", "Set to " .. getgenv().FlingSpin, 2)
         return
     end
     if cmd == ".flingpower" and args[2] then
         getgenv().FlingPower = tonumber(args[2])
-        if showNotifications then
-            Message("FlingPower", "Current: "..getgenv().FlingPower, 2)
-        end
+        Message("FlingPower", "Set to " .. getgenv().FlingPower, 2)
         return
     end
 
     if cmd == ".walkfling" then
         StartWalkFling()
-        if showNotifications then
-            Message("WalkFling", "Started!", 2)
-        end
+        Message("WalkFling", "Started walk fling.", 2)
         SendIYCommand(";walkfling")
         return
     end
     if cmd == ".unwalkfling" then
         StopWalkFling()
-        if showNotifications then
-            Message("WalkFling", "Stopped!", 2)
-        end
+        Message("WalkFling", "Stopped walk fling.", 2)
         SendIYCommand(";unwalkfling")
         return
     end
@@ -1036,9 +1027,12 @@ function HandleChat(p, msg, showNotifications)
     end
 
     if cmd == ".fov" and args[2] then
-        Workspace.CurrentCamera.FieldOfView = tonumber(args[2])
-        if showNotifications then
-            Message("FOV", "Set to "..args[2], 2)
+        local fov = tonumber(args[2])
+        if fov then
+            Workspace.CurrentCamera.FieldOfView = fov
+            Message("FOV", "Set to " .. fov, 2)
+        else
+            Message("FOV", "Invalid FOV value.", 2)
         end
         return
     end
@@ -1057,17 +1051,18 @@ function HandleChat(p, msg, showNotifications)
             for _, plr in ipairs(Players:GetPlayers()) do
                 getgenv().Whitelisted[plr.Name] = true
             end
-            if showNotifications then
-                Message("Whitelist", "All players whitelisted", 2)
-            end
+            Message("Whitelist", "All players whitelisted.", 2)
         else
+            local found = false
             for _, plr in ipairs(Players:GetPlayers()) do
                 if plr.Name:lower():find(args[2]:lower()) or plr.DisplayName:lower():find(args[2]:lower()) then
                     getgenv().Whitelisted[plr.Name] = true
-                    if showNotifications then
-                        Message("Whitelist", "Whitelisted "..plr.Name, 2)
-                    end
+                    Message("Whitelist", "Whitelisted " .. plr.DisplayName, 2)
+                    found = true
                 end
+            end
+            if not found then
+                Message("Whitelist", "No players found matching '" .. args[2] .. "'.", 2)
             end
         end
         return
@@ -1081,28 +1076,22 @@ function HandleChat(p, msg, showNotifications)
                     clearedCount = clearedCount + 1
                 end
             end
-            if showNotifications then
-                Message("Whitelist", "Cleared " .. clearedCount .. " players from whitelist (kept local player)", 2)
-            end
+            Message("Whitelist", "Cleared " .. clearedCount .. " players from whitelist (kept local player).", 2)
         else
             local found = false
             for _, plr in ipairs(Players:GetPlayers()) do
                 if plr.Name:lower():find(args[2]:lower()) or plr.DisplayName:lower():find(args[2]:lower()) then
                     if plr.Name ~= Player.Name then
                         getgenv().Whitelisted[plr.Name] = nil
-                        if showNotifications then
-                            Message("Whitelist", "Removed "..plr.Name, 2)
-                        end
+                        Message("Whitelist", "Removed " .. plr.DisplayName, 2)
                         found = true
                     else
-                        if showNotifications then
-                            Message("Whitelist", "Cannot unwhitelist yourself!", 2)
-                        end
+                        Message("Whitelist", "Cannot unwhitelist yourself!", 2)
                     end
                 end
             end
-            if not found and showNotifications then
-                Message("Whitelist", "No players found matching '"..args[2].."'", 2)
+            if not found then
+                Message("Whitelist", "No players found matching '" .. args[2] .. "'.", 2)
             end
         end
         return
@@ -1111,46 +1100,47 @@ function HandleChat(p, msg, showNotifications)
     if cmd == ".listwl" then
         local wl = {}
         for name, _ in pairs(getgenv().Whitelisted) do table.insert(wl, name) end
-        if showNotifications then
-            Message("Whitelist", "Whitelisted: " .. table.concat(wl, ", "), 5)
-        end
+        Message("Whitelist", "Whitelisted: " .. table.concat(wl, ", "), 5)
         return
     end
 
     if (cmd == ".jumppower" or cmd == ".jp") and args[2] then
         local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+        local jp = tonumber(args[2])
         if hum then
-            hum.UseJumpPower = true
-            hum.JumpPower = tonumber(args[2])
-            if showNotifications then
-                Message("JumpPower", "Set to "..args[2], 2)
+            if jp then
+                hum.UseJumpPower = true
+                hum.JumpPower = jp
+                Message("JumpPower", "Set to " .. jp, 2)
+            else
+                Message("JumpPower", "Invalid jump power value.", 2)
             end
+        else
+            Message("JumpPower", "No humanoid found.", 2)
         end
         return
     end
 
     if cmd == ".fly" then
         StartFly(tonumber(args[2]) or 85)
-        if showNotifications then
-            Message("Fly", "Enabled", 2)
-        end
         return
     end
     if cmd == ".unfly" then
         StopFly()
-        if showNotifications then
-            Message("Fly", "Disabled", 2)
-        end
         return
     end
     if cmd == ".speed" and args[2] then
         local val = tonumber(args[2])
         local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
         if hum then
-            hum.WalkSpeed = val
-            if showNotifications then
-                Message("Speed", "Set to "..val, 2)
+            if val then
+                hum.WalkSpeed = val
+                Message("Speed", "Set to " .. val, 2)
+            else
+                Message("Speed", "Invalid speed value.", 2)
             end
+        else
+            Message("Speed", "No humanoid found.", 2)
         end
         return
     end
@@ -1168,20 +1158,13 @@ function HandleChat(p, msg, showNotifications)
         local target = FindPlayer(args[2])
         if target then
             LoopGoto(target)
-            if showNotifications then
-                Message("LoopGoto", "Looping to "..target.DisplayName, 2)
-            end
+            Message("LoopGoto", "Looping to " .. target.DisplayName, 2)
         else
-            if showNotifications then
-                Message("LoopGoto", "Player not found", 2)
-            end
+            Message("LoopGoto", "Player '" .. args[2] .. "' not found.", 2)
         end
         return
     elseif cmd == ".unloopgoto" then
         StopLoopGoto()
-        if showNotifications then
-            Message("LoopGoto", "Stopped loopgoto", 2)
-        end
         return
     end
 
@@ -1197,24 +1180,40 @@ function HandleChat(p, msg, showNotifications)
     if cmd == ".goto" and args[2] then
         local target = FindPlayer(args[2])
         if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
-            Player.Character.HumanoidRootPart.CFrame = target.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0)
+            local myRoot = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+            if myRoot then
+                myRoot.CFrame = target.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0)
+                Message("Goto", "Teleported to " .. target.DisplayName, 2)
+            else
+                Message("Goto", "Your character not found.", 2)
+            end
+        else
+            Message("Goto", "Player '" .. args[2] .. "' not found or no character.", 2)
         end
         return
     end
 
     if cmd == ".tptool" then
         local mouse = Player:GetMouse()
+        if not mouse then
+            Message("TP Tool", "Mouse not available. Your executor may not support this feature.", 3)
+            return
+        end
         local tool = Instance.new("Tool")
         tool.RequiresHandle = false
         tool.Name = "TP Tool (Click TP)"
         tool.Activated:Connect(function()
             local pos = mouse.Hit + Vector3.new(0, 2.5, 0)
-            Player.Character.HumanoidRootPart.CFrame = CFrame.new(pos.X, pos.Y, pos.Z)
+            local myRoot = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+            if myRoot then
+                myRoot.CFrame = CFrame.new(pos.X, pos.Y, pos.Z)
+                Message("TP Tool", "Teleported to mouse position.", 2)
+            else
+                Message("TP Tool", "Your character not found.", 2)
+            end
         end)
         tool.Parent = Player.Backpack
-        if showNotifications then
-            Message("TP Tool", "Added to backpack", 2)
-        end
+        Message("TP Tool", "Added to backpack.", 2)
         return
     end
 end
@@ -1241,5 +1240,6 @@ local function HookChat()
 end
 
 HookChat()
+
 
 
