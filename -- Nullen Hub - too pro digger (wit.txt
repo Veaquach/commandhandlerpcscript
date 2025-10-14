@@ -8,8 +8,6 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 
-getgenv().LoveList = getgenv().LoveList or {}
-
 local Player = Players.LocalPlayer
 local charRemovingConn, charAddedConn, lastRespawnPos
 local StopVelConn
@@ -559,26 +557,25 @@ local function SkidFlingWithSafeReturn(TargetPlayer)
     end)
 
     -- SAFE RETURN: teleport back gradually until velocity is near zero
-spawn(function()
-    repeat task.wait(0.03) until not getgenv().FlingActive
+    spawn(function()
+        repeat task.wait(0.03) until not getgenv().FlingActive
 
-    if root and root.Parent then
-        local VELOCITY_THRESHOLD = 5 -- studs/sec, considered "stopped"
-        -- loop until velocity is low
-        while root.Parent and root.AssemblyLinearVelocity.Magnitude > VELOCITY_THRESHOLD do
-            pcall(function()
-                root.CFrame = OriginalPos
-                root.Velocity = Vector3.new(0,0,0)
-            end)
-            task.wait(0.03)
+        if root and root.Parent then
+            local VELOCITY_THRESHOLD = 5 -- studs/sec, considered "stopped"
+            while root.Parent and root.AssemblyLinearVelocity.Magnitude > VELOCITY_THRESHOLD do
+                pcall(function()
+                    root.CFrame = OriginalPos
+                    root.Velocity = Vector3.new(0,0,0)
+                end)
+                task.wait(0.03)
+            end
         end
-    end
 
-    -- cleanup
-    bv:Destroy()
-    bav:Destroy()
-    if conn then conn:Disconnect() end
-end)
+        bv:Destroy()
+        bav:Destroy()
+        if conn then conn:Disconnect() end
+    end)
+end
 
 -- ANTI-VOID MODULE
 local AntiVoidConn
@@ -697,149 +694,6 @@ function HandleChat(p,msg)
         return
     end
 
-        if cmd == ".love" and args[2] then
-        local target = FindPlayer(args[2])
-        if target then
-            getgenv().LoveList[target.Name:lower()] = true
-            Message("Love", target.DisplayName .. " added to your LoveList ❤️", 3)
-        else
-            Message("Love", "Player '" .. args[2] .. "' not found!", 3)
-        end
-        return
-    end
-
-    if cmd == ".unlove" and args[2] then
-        local target = FindPlayer(args[2])
-        local name = args[2]:lower()
-        if getgenv().LoveList[name] then
-            getgenv().LoveList[name] = nil
-            Message("Love", (target and target.DisplayName or name) .. " removed from your LoveList 💔", 3)
-        else
-            Message("Love", "Player '" .. name .. "' is not in your LoveList!", 3)
-        end
-        return
-    end
-
-if cmd == ".kiss" then
-        local myChar = Player.Character
-        local theirChar = p.Character
-        if myChar and theirChar then
-            local myRoot = myChar:FindFirstChild("HumanoidRootPart")
-            local theirRoot = theirChar:FindFirstChild("HumanoidRootPart")
-            local myHum = myChar:FindFirstChildOfClass("Humanoid")
-            if myRoot and theirRoot and myHum then
-                -- Stop any existing kiss connection
-                if getgenv().KissConn then
-                    getgenv().KissConn:Disconnect()
-                    getgenv().KissConn = nil
-                end
-                -- Store original movement state
-                local originalWalkSpeed = myHum.WalkSpeed
-                local originalJumpPower = myHum.JumpPower
-                local originalAnchored = myRoot.Anchored
-                local kissStartTime = tick()
-                local kissDuration = 1.8 -- Total 2.2 seconds
-                local moveDuration = 0.5 -- Time for forward/backward motion
-                local initialWait = 0.2 -- Wait 0.2s before moving
-                -- Disable movement
-                myHum.WalkSpeed = 0
-                myHum.JumpPower = 0
-                -- Set initial position with brief anchor
-                local targetCFrame = theirRoot.CFrame
-                local startPos = targetCFrame * CFrame.new(0, 0, -2.2) -- 2.2 studs in front, no vertical offset
-                local closePos = targetCFrame * CFrame.new(0, 0, -1.2) -- 1.2 studs in front for kiss
-                local lookAtCFrame = CFrame.new(startPos.Position, targetCFrame.Position) -- Face the target
-                pcall(function()
-                    myRoot.Anchored = true
-                    myRoot.CFrame = lookAtCFrame
-                    task.wait(0.05) -- Brief anchor to stabilize
-                    myRoot.Anchored = originalAnchored
-                end)
-                -- Create BodyVelocity to prevent movement
-                local bodyVel = Instance.new("BodyVelocity")
-                bodyVel.MaxForce = Vector3.new(1e6, 1e6, 1e6) -- Strong force
-                bodyVel.Velocity = Vector3.new(0, 0, 0) -- No movement
-                bodyVel.Parent = myRoot
-                -- Create BodyGyro to lock orientation
-                local bodyGyro = Instance.new("BodyGyro")
-                bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-                bodyGyro.P = 20000 -- Strong for stability
-                bodyGyro.D = 2000
-                bodyGyro.Parent = myRoot
-                -- Lock position and perform kiss motion
-                getgenv().KissConn = RunService.Heartbeat:Connect(function()
-                    local elapsed = tick() - kissStartTime
-                    if elapsed > kissDuration or not theirChar or not theirChar.Parent or not theirRoot or not theirRoot.Parent then
-                        if getgenv().KissConn then
-                            getgenv().KissConn:Disconnect()
-                            getgenv().KissConn = nil
-                        end
-                        if myRoot and myRoot.Parent then
-                            pcall(function()
-                                bodyVel:Destroy()
-                                bodyGyro:Destroy()
-                                myHum.WalkSpeed = originalWalkSpeed
-                                myHum.JumpPower = originalJumpPower
-                                myRoot.Velocity = Vector3.new(0, 0, 0)
-                                if myRoot.AssemblyLinearVelocity then
-                                    myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                                end
-                            end)
-                        end
-                        Message("Love", "Kiss ended! 💋", 2)
-                        return
-                    end
-                    -- Update position and orientation
-                    local targetCFrame = theirRoot.CFrame
-                    local startPos = targetCFrame * CFrame.new(0, 0, -2.2) -- 2.2 studs in front
-                    local closePos = targetCFrame * CFrame.new(0, 0, -1.2) -- 1.2 studs in front
-                    local currentPos
-                    if elapsed < initialWait then
-                        -- Stay still for 0.2s
-                        currentPos = startPos
-                    elseif elapsed < initialWait + moveDuration then
-                        -- Move forward (0.2s to 0.7s)
-                        local t = (elapsed - initialWait) / moveDuration
-                        currentPos = startPos:Lerp(closePos, t)
-                    elseif elapsed < initialWait + 2 * moveDuration then
-                        -- Move backward (0.7s to 1.2s)
-                        local t = (elapsed - initialWait - moveDuration) / moveDuration
-                        currentPos = closePos:Lerp(startPos, t)
-                    else
-                        -- Stay at original position (1.2s to 2.2s)
-                        currentPos = startPos
-                    end
-                    local lookAtCFrame = CFrame.new(currentPos.Position, targetCFrame.Position) -- Face the target
-                    pcall(function()
-                        myRoot.CFrame = lookAtCFrame
-                        bodyGyro.CFrame = lookAtCFrame -- Lock orientation
-                        myRoot.Velocity = Vector3.new(0, 0, 0)
-                        if myRoot.AssemblyLinearVelocity then
-                            myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                        end
-                    end)
-                end)
-                Message("Love", p.DisplayName .. " kissed you! 💋😘", 3)
-            else
-                Message("Love", "Missing character parts!", 2)
-            end
-        else
-            Message("Love", "Character not found!", 2)
-        end
-        return
-    end
-
-    if cmd == ".punish" then
-        local myHum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
-        if myHum then
-            myHum.Health = 0
-            Message("Love", p.DisplayName .. " playfully punished you! 💥", 3)
-        else
-            Message("Love", "Couldn't reset (no humanoid found).", 2)
-        end
-        return
-    end
-
     if cmd == ".cmdstatus" then CmdStatus() return end
     if cmd == ".flingstatus" then FlingStatus() return end
 
@@ -921,15 +775,25 @@ if cmd == ".kiss" then
             end
         end
         return
+		
     elseif cmd==".unwl" and args[2] then
+    local input = args[2]:lower()
+    if input == "all" then
+        for plrName in pairs(getgenv().Whitelisted) do
+            getgenv().Whitelisted[plrName] = nil
+        end
+        Message("Whitelist","Removed all players from whitelist",2)
+    else
         for _,plr in ipairs(Players:GetPlayers()) do
-            if plr.Name:lower():find(args[2]:lower()) or plr.DisplayName:lower():find(args[2]:lower()) then
+            if plr.Name:lower():find(input) or plr.DisplayName:lower():find(input) then
                 getgenv().Whitelisted[plr.Name]=nil
                 Message("Whitelist","Removed "..plr.Name,2)
             end
         end
-        return
     end
+    return
+end
+
 
     if (cmd == ".jumppower" or cmd == ".jp") and args[2] then
         local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
@@ -962,6 +826,7 @@ if cmd == ".kiss" then
             Message("LoopGoto", "Player not found", 2)
         end
         return
+
     elseif cmd == ".unloopgoto" then
         StopLoopGoto()
         Message("LoopGoto", "Stopped loopgoto", 2)
@@ -971,13 +836,75 @@ if cmd == ".kiss" then
     if cmd == ".noclip" then EnableNoclip() return end
     if cmd == ".clip" then DisableNoclip() return end
 
-    if cmd==".goto" and args[2] then
-        local target=FindPlayer(args[2])
-        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
-            Player.Character.HumanoidRootPart.CFrame=target.Character.HumanoidRootPart.CFrame+Vector3.new(0,3,0)
+	if cmd == ".namelessadmin" then
+    Message("Loader", "Loading NamelessAdmin...", 2)
+    local ok, err = pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/Nameless-Admin/main/Source.lua"))()
+    end)
+    if not ok then Message("Loader", "Error: "..tostring(err), 3) end
+    return
+end
+
+if cmd == ".infyield" then
+    Message("Loader", "Loading Infinite Yield...", 2)
+    local ok, err = pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+    end)
+    if not ok then Message("Loader", "Error: "..tostring(err), 3) end
+    return
+end
+
+if cmd == ".bypasser" then
+    Message("Loader", "Loading Bypasser...", 2)
+    local ok, err = pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/fearlessd3v/TEAM-FEARLESS/refs/heads/main/fearless-chat-bypass"))()
+    end)
+    if not ok then Message("Loader", "Error: "..tostring(err), 3) end
+    return
+end
+
+if cmd == ".mm2" then
+    Message("Loader", "Loading MM2 loader...", 2)
+    local ok, err = pcall(function()
+        loadstring(game:HttpGet('https://raw.githubusercontent.com/thunderXhub/ThunderXHUB/refs/heads/main/loader'))()
+    end)
+    if not ok then Message("Loader", "Error: "..tostring(err), 3) end
+    return
+end
+
+
+if cmd == ".goto" and args[2] then
+    local target
+
+    -- Check for random teleport
+    if args[2]:lower() == "random" then
+        local allPlayers = Players:GetPlayers()
+        if #allPlayers > 1 then
+            repeat
+                target = allPlayers[math.random(1, #allPlayers)]
+            until target ~= p  -- make sure you don't teleport to yourself
         end
-        return
+    else
+        target = FindPlayer(args[2])
     end
+
+    -- Teleport if valid target found
+    if target and target.Character then
+        local root = target.Character:FindFirstChild("HumanoidRootPart")
+        if root and p.Character then
+            local charRoot = p.Character:FindFirstChild("HumanoidRootPart")
+            if charRoot then
+                charRoot.CFrame = root.CFrame + Vector3.new(0, 3, 0)
+                Message("Goto", "Teleported to " .. target.Name, 2)
+            end
+        else
+            Message("Goto", "Target HumanoidRootPart not found.", 2)
+        end
+    else
+        Message("Goto", "Player not found.", 2)
+    end
+    return
+end
 
     if cmd==".tptool" then
         local mouse=Player:GetMouse()
@@ -993,7 +920,7 @@ if cmd == ".kiss" then
         return
     end
 
-end -- << properly closes HandleChat
+end
 
 -- === CHAT HOOK FUNCTION ===
 local function HookChat()
@@ -1011,10 +938,9 @@ local function HookChat()
     -- hook players that join later
     Players.PlayerAdded:Connect(function(p)
         hookPlayer(p)
-end)
+    end)
 
     Message("Nullen Hub", "Best command handler made by mankind up and working.", 3)
 end
 
-
-HookChat() -- call the function
+HookChat()
