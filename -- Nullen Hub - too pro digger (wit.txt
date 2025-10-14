@@ -8,6 +8,8 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 
+getgenv().LoveList = getgenv().LoveList or {}
+
 local Player = Players.LocalPlayer
 local charRemovingConn, charAddedConn, lastRespawnPos
 local StopVelConn
@@ -695,6 +697,149 @@ function HandleChat(p,msg)
         return
     end
 
+        if cmd == ".love" and args[2] then
+        local target = FindPlayer(args[2])
+        if target then
+            getgenv().LoveList[target.Name:lower()] = true
+            Message("Love", target.DisplayName .. " added to your LoveList ❤️", 3)
+        else
+            Message("Love", "Player '" .. args[2] .. "' not found!", 3)
+        end
+        return
+    end
+
+    if cmd == ".unlove" and args[2] then
+        local target = FindPlayer(args[2])
+        local name = args[2]:lower()
+        if getgenv().LoveList[name] then
+            getgenv().LoveList[name] = nil
+            Message("Love", (target and target.DisplayName or name) .. " removed from your LoveList 💔", 3)
+        else
+            Message("Love", "Player '" .. name .. "' is not in your LoveList!", 3)
+        end
+        return
+    end
+
+if cmd == ".kiss" then
+        local myChar = Player.Character
+        local theirChar = p.Character
+        if myChar and theirChar then
+            local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+            local theirRoot = theirChar:FindFirstChild("HumanoidRootPart")
+            local myHum = myChar:FindFirstChildOfClass("Humanoid")
+            if myRoot and theirRoot and myHum then
+                -- Stop any existing kiss connection
+                if getgenv().KissConn then
+                    getgenv().KissConn:Disconnect()
+                    getgenv().KissConn = nil
+                end
+                -- Store original movement state
+                local originalWalkSpeed = myHum.WalkSpeed
+                local originalJumpPower = myHum.JumpPower
+                local originalAnchored = myRoot.Anchored
+                local kissStartTime = tick()
+                local kissDuration = 1.8 -- Total 2.2 seconds
+                local moveDuration = 0.5 -- Time for forward/backward motion
+                local initialWait = 0.2 -- Wait 0.2s before moving
+                -- Disable movement
+                myHum.WalkSpeed = 0
+                myHum.JumpPower = 0
+                -- Set initial position with brief anchor
+                local targetCFrame = theirRoot.CFrame
+                local startPos = targetCFrame * CFrame.new(0, 0, -2.2) -- 2.2 studs in front, no vertical offset
+                local closePos = targetCFrame * CFrame.new(0, 0, -1.2) -- 1.2 studs in front for kiss
+                local lookAtCFrame = CFrame.new(startPos.Position, targetCFrame.Position) -- Face the target
+                pcall(function()
+                    myRoot.Anchored = true
+                    myRoot.CFrame = lookAtCFrame
+                    task.wait(0.05) -- Brief anchor to stabilize
+                    myRoot.Anchored = originalAnchored
+                end)
+                -- Create BodyVelocity to prevent movement
+                local bodyVel = Instance.new("BodyVelocity")
+                bodyVel.MaxForce = Vector3.new(1e6, 1e6, 1e6) -- Strong force
+                bodyVel.Velocity = Vector3.new(0, 0, 0) -- No movement
+                bodyVel.Parent = myRoot
+                -- Create BodyGyro to lock orientation
+                local bodyGyro = Instance.new("BodyGyro")
+                bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+                bodyGyro.P = 20000 -- Strong for stability
+                bodyGyro.D = 2000
+                bodyGyro.Parent = myRoot
+                -- Lock position and perform kiss motion
+                getgenv().KissConn = RunService.Heartbeat:Connect(function()
+                    local elapsed = tick() - kissStartTime
+                    if elapsed > kissDuration or not theirChar or not theirChar.Parent or not theirRoot or not theirRoot.Parent then
+                        if getgenv().KissConn then
+                            getgenv().KissConn:Disconnect()
+                            getgenv().KissConn = nil
+                        end
+                        if myRoot and myRoot.Parent then
+                            pcall(function()
+                                bodyVel:Destroy()
+                                bodyGyro:Destroy()
+                                myHum.WalkSpeed = originalWalkSpeed
+                                myHum.JumpPower = originalJumpPower
+                                myRoot.Velocity = Vector3.new(0, 0, 0)
+                                if myRoot.AssemblyLinearVelocity then
+                                    myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                end
+                            end)
+                        end
+                        Message("Love", "Kiss ended! 💋", 2)
+                        return
+                    end
+                    -- Update position and orientation
+                    local targetCFrame = theirRoot.CFrame
+                    local startPos = targetCFrame * CFrame.new(0, 0, -2.2) -- 2.2 studs in front
+                    local closePos = targetCFrame * CFrame.new(0, 0, -1.2) -- 1.2 studs in front
+                    local currentPos
+                    if elapsed < initialWait then
+                        -- Stay still for 0.2s
+                        currentPos = startPos
+                    elseif elapsed < initialWait + moveDuration then
+                        -- Move forward (0.2s to 0.7s)
+                        local t = (elapsed - initialWait) / moveDuration
+                        currentPos = startPos:Lerp(closePos, t)
+                    elseif elapsed < initialWait + 2 * moveDuration then
+                        -- Move backward (0.7s to 1.2s)
+                        local t = (elapsed - initialWait - moveDuration) / moveDuration
+                        currentPos = closePos:Lerp(startPos, t)
+                    else
+                        -- Stay at original position (1.2s to 2.2s)
+                        currentPos = startPos
+                    end
+                    local lookAtCFrame = CFrame.new(currentPos.Position, targetCFrame.Position) -- Face the target
+                    pcall(function()
+                        myRoot.CFrame = lookAtCFrame
+                        bodyGyro.CFrame = lookAtCFrame -- Lock orientation
+                        myRoot.Velocity = Vector3.new(0, 0, 0)
+                        if myRoot.AssemblyLinearVelocity then
+                            myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        end
+                    end)
+                end)
+                Message("Love", p.DisplayName .. " kissed you! 💋😘", 3)
+            else
+                Message("Love", "Missing character parts!", 2)
+            end
+        else
+            Message("Love", "Character not found!", 2)
+        end
+        return
+    end
+
+    if cmd == ".punish" then
+        local myHum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+        if myHum then
+            myHum.Health = 0
+            Message("Love", p.DisplayName .. " playfully punished you! 💥", 3)
+        else
+            Message("Love", "Couldn't reset (no humanoid found).", 2)
+        end
+        return
+    end
+
     if cmd == ".cmdstatus" then CmdStatus() return end
     if cmd == ".flingstatus" then FlingStatus() return end
 
@@ -870,5 +1015,6 @@ end)
 
     Message("Nullen Hub", "Best command handler made by mankind up and working.", 3)
 end
+
 
 HookChat() -- call the function
