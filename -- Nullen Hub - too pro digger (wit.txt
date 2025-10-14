@@ -1,4 +1,4 @@
--- Nullen Hub - too pro digger
+-- Nullen Hub - too pro digger (with anti-fling return, instant TP SkidFling)
 
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -7,292 +7,52 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
+local TextChatService = game:GetService("TextChatService")
+
+getgenv().LoveList = getgenv().LoveList or {}
+getgenv().Configs = getgenv().Configs or {}
+getgenv().Whitelisted = getgenv().Whitelisted or {[Players.LocalPlayer.Name] = true}
+getgenv().FlingForce = getgenv().FlingForce or 1e9
+getgenv().FlingSpin = getgenv().FlingSpin or 50
+getgenv().FlingPower = getgenv().FlingPower or 2000
+getgenv().FlySpeed = getgenv().FlySpeed or 85
+getgenv().KissActive = getgenv().KissActive or false
+getgenv().KissConn = getgenv().KissConn or nil
+getgenv().KissBodyVel = getgenv().KissBodyVel or nil
+getgenv().KissBodyGyro = getgenv().KissBodyGyro or nil
+getgenv().KissOriginalWalkSpeed = getgenv().KissOriginalWalkSpeed or nil
+getgenv().KissOriginalJumpPower = getgenv().KissOriginalJumpPower or nil
+getgenv().FlingActive = getgenv().FlingActive or false
 
 local Player = Players.LocalPlayer
 local charRemovingConn, charAddedConn, lastRespawnPos
 local StopVelConn
-
--- === VIEW SYSTEM ===
-local ViewConn
-function ViewPlayer(target)
-    if not target or not target.Character then return end
-    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-    if not targetRoot then return end
-    local cam = Workspace.CurrentCamera
-    if ViewConn then ViewConn:Disconnect() end
-    ViewConn = RunService.RenderStepped:Connect(function()
-        if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then return end
-        cam.CameraSubject = target.Character.HumanoidRootPart
-        cam.CameraType = Enum.CameraType.Scriptable
-        cam.CFrame = target.Character.HumanoidRootPart.CFrame * CFrame.new(0, 5, 12) * CFrame.Angles(0, math.rad(180), 0)
-    end)
-    Message("View", "Now viewing "..target.Name, 2)
-end
-function UnviewPlayer()
-    if ViewConn then ViewConn:Disconnect() ViewConn = nil end
-    local cam = Workspace.CurrentCamera
-    cam.CameraType = Enum.CameraType.Custom
-    cam.CameraSubject = Player.Character and Player.Character:FindFirstChildWhichIsA("Humanoid") or Player.Character
-    Message("View", "Stopped viewing.", 2)
-end
-
--- Stop velocity for a short duration (default 0.7s)
-function StopVelocity(duration)
-    duration = tonumber(duration) or 0.7
-    if StopVelConn then
-        StopVelConn:Disconnect()
-        StopVelConn = nil
-    end
-    local endTime = tick() + duration
-    StopVelConn = RunService.Heartbeat:Connect(function()
-        local char = Player.Character
-        if not char or tick() > endTime then
-            if StopVelConn then StopVelConn:Disconnect() StopVelConn = nil end
-            return
-        end
-        local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("LowerTorso") or char:FindFirstChild("Torso")
-        if hrp then
-            pcall(function()
-                hrp.Velocity = Vector3.new(0,0,0)
-                if hrp.AssemblyLinearVelocity then hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end
-            end)
-        else
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    pcall(function()
-                        part.Velocity = Vector3.new(0,0,0)
-                        if part.AssemblyLinearVelocity then part.AssemblyLinearVelocity = Vector3.new(0,0,0) end
-                    end)
-                end
-            end
-        end
-    end)
-end
-
-function CancelStopVelocity()
-    if StopVelConn then
-        StopVelConn:Disconnect()
-        StopVelConn = nil
-        Message("StopVel", "Stop-velocity cancelled", 2)
-    end
-end
-
--- === CONFIG SYSTEM (no whitelist) ===
-getgenv().Configs = getgenv().Configs or {}
-
-function CollectConfig()
-    local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
-    return {
-        FlingForce = getgenv().FlingForce,
-        FlingSpin = getgenv().FlingSpin,
-        FlingPower = getgenv().FlingPower,
-        InstaRespawn = getgenv().InstaRespawnActive,
-        FlingActive = getgenv().FlingActive,
-        WalkFlingActive = getgenv().WalkFlingActive,
-        TouchFlingActive = getgenv().TouchFlingActive,
-        LoopGotoActive = getgenv().LoopGotoActive,
-        WalkSpeed = hum and hum.WalkSpeed or 16,
-        JumpPower = hum and hum.UseJumpPower and hum.JumpPower or 50,
-        FlySpeed = getgenv().FlySpeed or 85,
-        Noclip = NoclipConn and true or false,
-        NoDamage = NoDamageConn and true or false,
-        AntiFallDamage = AntiFallDamageActive,
-    }
-end
-
-function ApplyConfig(cfg)
-    if not cfg then return end
-    getgenv().FlingForce = cfg.FlingForce or getgenv().FlingForce
-    getgenv().FlingSpin = cfg.FlingSpin or getgenv().FlingSpin
-    getgenv().FlingPower = cfg.FlingPower or getgenv().FlingPower
-    getgenv().InstaRespawnActive = cfg.InstaRespawn
-    getgenv().FlingActive = cfg.FlingActive
-    getgenv().WalkFlingActive = cfg.WalkFlingActive
-    getgenv().TouchFlingActive = cfg.TouchFlingActive
-    getgenv().LoopGotoActive = cfg.LoopGotoActive
-    local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
-    if hum then
-        if cfg.WalkSpeed then hum.WalkSpeed = cfg.WalkSpeed end
-        if cfg.JumpPower then hum.UseJumpPower = true hum.JumpPower = cfg.JumpPower end
-    end
-    getgenv().FlySpeed = cfg.FlySpeed or getgenv().FlySpeed
-    -- Feature toggles
-    if cfg.WalkFlingActive then StartWalkFling() else StopWalkFling() end
-    if cfg.Noclip then EnableNoclip() else DisableNoclip() end
-    if cfg.NoDamage then EnableNoDamage() else DisableNoDamage() end
-    if cfg.AntiFallDamage then EnableAntiFallDamage() else DisableAntiFallDamage() end
-    if cfg.InstaRespawn then EnableInstaRespawn() else DisableInstaRespawn() end
-end
-
-local NoDamageConn
-function EnableNoDamage()
-    if NoDamageConn then return end
-    local char = Player.Character
-    if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    NoDamageConn = hum:GetPropertyChangedSignal("Health"):Connect(function()
-        if hum.Health < hum.MaxHealth then
-            hum.Health = hum.MaxHealth
-        end
-    end)
-    Message("NoDamage", "NoDamage enabled.", 2)
-end
-function DisableNoDamage()
-    if NoDamageConn then
-        NoDamageConn:Disconnect()
-        NoDamageConn = nil
-    end
-    Message("NoDamage", "NoDamage disabled.", 2)
-end
-
-local NoclipConn
-function EnableNoclip()
-    if NoclipConn then return end
-    NoclipConn = RunService.Stepped:Connect(function()
-        local char = Player.Character
-        if char then
-            for _, part in ipairs(char:GetChildren()) do
-                if part:IsA("BasePart") then part.CanCollide = false end
-            end
-        end
-    end)
-    Message("Noclip", "Noclip enabled.", 2)
-end
-function DisableNoclip()
-    if NoclipConn then NoclipConn:Disconnect() NoclipConn = nil end
-    Message("Noclip", "Noclip disabled.", 2)
-end
-
--- === Floating Command Textbox ===
-local textboxGui
-function OpenTextbox()
-    if textboxGui then textboxGui:Destroy() end
-    textboxGui = Instance.new("ScreenGui")
-    textboxGui.Name = "CommandTextbox"
-    textboxGui.ResetOnSpawn = false
-    textboxGui.Parent = game:GetService("CoreGui")
-
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 350, 0, 50)
-    frame.Position = UDim2.new(0.5, -175, 0.7, 0)
-    frame.BackgroundColor3 = Color3.new(0.13, 0.13, 0.13)
-    frame.BorderSizePixel = 0
-    frame.Parent = textboxGui
-
-    local box = Instance.new("TextBox")
-    box.Size = UDim2.new(1, -10, 1, -10)
-    box.Position = UDim2.new(0, 5, 0, 5)
-    box.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
-    box.TextColor3 = Color3.new(1, 1, 1)
-    box.Font = Enum.Font.SourceSans
-    box.TextSize = 20
-    box.ClearTextOnFocus = false
-    box.Text = ""
-    box.PlaceholderText = "Type command here and press Enter..."
-    box.Parent = frame
-
-    box.FocusLost:Connect(function(enter)
-        if enter then
-            local text = box.Text
-            box.Text = ""
-            if text ~= "" then
-                HandleChat(Player, text)
-            end
-        end
-    end)
-end
-function CloseTextbox()
-    if textboxGui then textboxGui:Destroy() textboxGui = nil end
-end
-
--- === AntiFallDamage Toggle ===
+local VelocityThreshold = 600 -- studs/sec
+local AntiVoidEnabled = false
+local AntiVoidConn
+local VOID_CHECK_Y = (Workspace and Workspace.FallenPartsDestroyHeight) or -100
 local AntiFallDamageActive = false
 local AntiFallDamageConns = {}
+local Flying = false
+local ctrl = {f=0, b=0, l=0, r=0, u=0, d=0}
+local bv, bg, flyConn, hum
+local SpinConn
+local loopGotoConn
+local NoDamageConn
+local NoclipConn
+local processedMessages = {}
 
-function EnableAntiFallDamage()
-    if AntiFallDamageActive then return end
-    AntiFallDamageActive = true
-    local function f(c)
-        local r = c:WaitForChild("HumanoidRootPart", 5)
-        if r then
-            local con
-            con = RunService.Heartbeat:Connect(function()
-                if not AntiFallDamageActive or not r.Parent then
-                    if con then con:Disconnect() end
-                    return
-                end
-                local v = r.AssemblyLinearVelocity
-                r.AssemblyLinearVelocity = Vector3.zero
-                RunService.RenderStepped:Wait()
-                r.AssemblyLinearVelocity = v
-            end)
-            table.insert(AntiFallDamageConns, con)
-        end
-    end
-    if Player.Character then f(Player.Character) end
-    table.insert(AntiFallDamageConns, Player.CharacterAdded:Connect(f))
-    Message("AntiFallDamage", "Enabled antifalldamage", 2)
-end
-function DisableAntiFallDamage()
-    AntiFallDamageActive = false
-    for _, conn in ipairs(AntiFallDamageConns) do
-        if conn then pcall(function() conn:Disconnect() end) end
-    end
-    AntiFallDamageConns = {}
-    Message("AntiFallDamage", "Disabled antifalldamage", 2)
-end
-
-function EnableInstaRespawn()
-    if getgenv().InstaRespawnActive then return end
-    getgenv().InstaRespawnActive = true
-    if charRemovingConn then charRemovingConn:Disconnect() charRemovingConn=nil end
-    if charAddedConn then charAddedConn:Disconnect() charAddedConn=nil end
-    charRemovingConn = Player.CharacterRemoving:Connect(function(char)
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then lastRespawnPos = hrp.CFrame end
-    end)
-    charAddedConn = Player.CharacterAdded:Connect(function(char)
-        local hrp = char:WaitForChild("HumanoidRootPart",5)
-        local hum = char:WaitForChild("Humanoid",5)
-        if hrp and lastRespawnPos then hrp.CFrame = lastRespawnPos end
-        if hum then hum.Health = hum.MaxHealth end
-    end)
-    if Player.Character then
-        local hrp = Player.Character:FindFirstChild("HumanoidRootPart")
-        if hrp then lastRespawnPos = hrp.CFrame end
-    end
-    Message("InstaRespawn","Enabled instant respawn",2)
-end
-function DisableInstaRespawn()
-    getgenv().InstaRespawnActive = false
-    if charRemovingConn then charRemovingConn:Disconnect() charRemovingConn=nil end
-    if charAddedConn then charAddedConn:Disconnect() charAddedConn=nil end
-    lastRespawnPos = nil
-    Message("InstaRespawn","Disabled instant respawn",2)
-end
-
--- HUB VARIABLES
-getgenv().Whitelisted = {[Player.Name]=true}
-getgenv().FlingForce = getgenv().FlingForce or 1e9
-getgenv().FlingSpin = getgenv().FlingSpin or 50
-getgenv().FlingPower = getgenv().FlingPower or 2000
-getgenv().FlingActive = false
-getgenv().WalkFlingActive = false
-getgenv().TouchFlingActive = false
-getgenv().FlySpeed = getgenv().FlySpeed or 85
-local VelocityThreshold = 600 -- studs/sec
-
-local function Message(title,text,duration)
+-- === UTILITY FUNCTIONS ===
+local function Message(title, text, duration)
     pcall(function()
-        StarterGui:SetCore("SendNotification",{Title=title,Text=text,Duration=duration or 3})
+        StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = duration or 3})
     end)
 end
 
 local function FindPlayer(query)
     if not query then return end
     query = query:lower()
-    for _,p in ipairs(Players:GetPlayers()) do
+    for _, p in ipairs(Players:GetPlayers()) do
         if p.Name:lower():find(query) or p.DisplayName:lower():find(query) then
             return p
         end
@@ -300,118 +60,359 @@ local function FindPlayer(query)
     return nil
 end
 
-getgenv().LoopGotoActive = false
-local loopGotoConn
-local function LoopGoto(TargetPlayer)
-    if not TargetPlayer then return end
-    getgenv().LoopGotoActive = true
-    local char = Player.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-    Message("LoopGoto", "Looping to " .. TargetPlayer.DisplayName, 2)
-    if loopGotoConn then loopGotoConn:Disconnect() end
-    loopGotoConn = RunService.Heartbeat:Connect(function()
-        if not getgenv().LoopGotoActive or not TargetPlayer or not TargetPlayer.Character then
-            if loopGotoConn then loopGotoConn:Disconnect() end
-            return
-        end
-        local targetRoot = TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if targetRoot and root then
-            local pos = targetRoot.CFrame * CFrame.new(0, 0, 2)
-            root.CFrame = pos
-        end
-    end)
-end
-local function StopLoopGoto()
-    getgenv().LoopGotoActive = false
-    if loopGotoConn then loopGotoConn:Disconnect() end
-    Message("LoopGoto", "Stopped loopgoto", 2)
+local function safeDestroy(obj)
+    if obj and typeof(obj) == "Instance" then
+        pcall(function() obj:Destroy() end)
+    end
 end
 
-local function SendIYCommand(cmd)
-    local success = false
-    pcall(function()
-        local chatEvent = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-        if chatEvent and chatEvent:FindFirstChild("SayMessageRequest") then
-            chatEvent.SayMessageRequest:FireServer(cmd,"All")
-            success = true
+local function getCharacterHumanoid()
+    local char = Player.Character or Player.CharacterAdded:Wait()
+    local root = char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 5)
+    local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
+    return root, hum
+end
+
+-- === SUPPORTING FUNCTIONS ===
+local function OpenTextbox()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "NullenHubTextbox"
+    screenGui.Parent = game:GetService("CoreGui")
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 300, 0, 50)
+    frame.Position = UDim2.new(0.5, -150, 0.1, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    frame.BorderSizePixel = 2
+    frame.Parent = screenGui
+    local textBox = Instance.new("TextBox")
+    textBox.Size = UDim2.new(0.9, 0, 0.6, 0)
+    textBox.Position = UDim2.new(0.05, 0, 0.2, 0)
+    textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textBox.Text = ""
+    textBox.PlaceholderText = "Enter command..."
+    textBox.Parent = frame
+    textBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed and textBox.Text ~= "" then
+            HandleChat(Player, textBox.Text, true)
+            textBox.Text = ""
         end
     end)
-    if not success then
-        local chatFrame = Player:FindFirstChild("PlayerGui") and Player.PlayerGui:FindFirstChild("Chat")
-        if chatFrame then
-            local chatBar = chatFrame:FindFirstChild("ChatBarParentFrame") 
-                            and chatFrame.ChatBarParentFrame:FindFirstChild("Frame") 
-                            and chatFrame.ChatBarParentFrame.Frame:FindFirstChild("BoxFrame") 
-                            and chatFrame.ChatBarParentFrame.Frame.BoxFrame:FindFirstChild("ChatBar")
-            if chatBar then
-                chatBar.Text = cmd
-            end
-        end
+end
+
+local function CloseTextbox()
+    local screenGui = game:GetService("CoreGui"):FindFirstChild("NullenHubTextbox")
+    if screenGui then
+        screenGui:Destroy()
     end
-    Message("Command Sent",cmd,3)
+end
+
+local function StopVelocity(duration)
+    if StopVelConn then StopVelConn:Disconnect() end
+    local root, hum = getCharacterHumanoid()
+    if not root or not hum then return end
+    StopVelConn = RunService.Heartbeat:Connect(function()
+        pcall(function()
+            root.Velocity = Vector3.new(0, 0, 0)
+            if root.AssemblyLinearVelocity then
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end
+        end)
+    end)
+    task.spawn(function()
+        task.wait(duration)
+        if StopVelConn then
+            StopVelConn:Disconnect()
+            StopVelConn = nil
+        end
+    end)
+end
+
+local function CancelStopVelocity()
+    if StopVelConn then
+        StopVelConn:Disconnect()
+        StopVelConn = nil
+    end
+end
+
+local function CollectConfig()
+    return {
+        FlingForce = getgenv().FlingForce,
+        FlingSpin = getgenv().FlingSpin,
+        FlingPower = getgenv().FlingPower,
+        FlySpeed = getgenv().FlySpeed,
+        LoveList = getgenv().LoveList,
+        Whitelisted = getgenv().Whitelisted
+    }
+end
+
+local function ApplyConfig(cfg)
+    if cfg.FlingForce then getgenv().FlingForce = cfg.FlingForce end
+    if cfg.FlingSpin then getgenv().FlingSpin = cfg.FlingSpin end
+    if cfg.FlingPower then getgenv().FlingPower = cfg.FlingPower end
+    if cfg.FlySpeed then getgenv().FlySpeed = cfg.FlySpeed end
+    if cfg.LoveList then getgenv().LoveList = cfg.LoveList end
+    if cfg.Whitelisted then getgenv().Whitelisted = cfg.Whitelisted end
+end
+
+local function SkidFlingWithSafeReturn(target)
+    local root, hum = getCharacterHumanoid()
+    if not root or not hum then return end
+    local targetRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+    if not targetRoot then return end
+    getgenv().FlingActive = true
+    local originalPos = root.CFrame
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bv.Velocity = targetRoot.CFrame.lookVector * getgenv().FlingPower
+    bv.Parent = root
+    local spin = Instance.new("BodyAngularVelocity")
+    spin.MaxTorque = Vector3.new(0, getgenv().FlingSpin, 0)
+    spin.AngularVelocity = Vector3.new(0, getgenv().FlingForce, 0)
+    spin.Parent = root
+    task.spawn(function()
+        task.wait(0.5)
+        pcall(function()
+            bv:Destroy()
+            spin:Destroy()
+            root.CFrame = originalPos
+            root.Velocity = Vector3.new(0, 0, 0)
+            if root.AssemblyLinearVelocity then
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end
+        end)
+        getgenv().FlingActive = false
+    end)
 end
 
 local function StartWalkFling()
-    getgenv().WalkFlingActive = true
-    local lp = Players.LocalPlayer
-    coroutine.wrap(function()
-        while getgenv().WalkFlingActive do
-            RunService.Heartbeat:Wait()
-            local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                hrp.Velocity = Vector3.new(math.random(-1e5,1e5),math.random(1e5,2e5),math.random(-1e5,1e5))
-            end
-        end
-    end)()
+    local root, hum = getCharacterHumanoid()
+    if not root or not hum then return end
+    getgenv().FlingActive = true
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(math.huge, 0, math.huge)
+    bv.Velocity = Vector3.new(0, 0, 0)
+    bv.Parent = root
+    local spin = Instance.new("BodyAngularVelocity")
+    spin.MaxTorque = Vector3.new(0, getgenv().FlingSpin, 0)
+    spin.AngularVelocity = Vector3.new(0, getgenv().FlingForce, 0)
+    spin.Parent = root
 end
+
 local function StopWalkFling()
-    getgenv().WalkFlingActive = false
-end
-
--- === STATUS COMMANDS ===
-
--- .cmdstatus: shows current toggles and key values
-function CmdStatus()
-    local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
-    local status = {
-        FlingActive = getgenv().FlingActive,
-        WalkFlingActive = getgenv().WalkFlingActive,
-        TouchFlingActive = getgenv().TouchFlingActive,
-        LoopGotoActive = getgenv().LoopGotoActive,
-        Noclip = NoclipConn ~= nil,
-        NoDamage = NoDamageConn ~= nil,
-        AntiFallDamage = AntiFallDamageActive,
-        InstaRespawn = getgenv().InstaRespawnActive,
-        Flying = Flying,
-        FlySpeed = getgenv().FlySpeed,
-        WalkSpeed = hum and hum.WalkSpeed or 16,
-        JumpPower = hum and hum.UseJumpPower and hum.JumpPower or 50,
-        AntiVoid = AntiVoidEnabled
-    }
-    local output = {}
-    for k,v in pairs(status) do
-        table.insert(output, k .. ": " .. tostring(v))
-    end
-    Message("Command Status", table.concat(output, "\n"), 5)
-end
-
--- .flingstatus: shows who you are currently fling-targeting
-function FlingStatus()
-    local targets = {}
-    if getgenv().FlingActive then
-        for _, plr in ipairs(Players:GetPlayers()) do
-            if plr ~= Player and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
-                -- optional: you could store exact targets when you call SkidFlingWithSafeReturn
-                table.insert(targets, plr.Name)
+    getgenv().FlingActive = false
+    local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    if root then
+        for _, v in ipairs(root:GetChildren()) do
+            if v:IsA("BodyVelocity") or v:IsA("BodyAngularVelocity") then
+                safeDestroy(v)
             end
         end
     end
-    local text = (#targets > 0 and "Flinging: " .. table.concat(targets, ", ")) or "No targets"
-    Message("Fling Status", text, 5)
 end
 
--- FLY MODULE
+-- SKID FLING (INSTA-TP VERSION) WITH SAFE RETURN & ANTI-FLING RETURN LOOP
+local function SkidFlingWithSafeReturn(TargetPlayer)
+    local char = Player.Character
+    if not char or not char.PrimaryPart then return end
+    local root = char.PrimaryPart
+    local OriginalPos = root.CFrame
+
+    local targetChar = TargetPlayer.Character
+    if not targetChar or not targetChar.PrimaryPart then return end
+    local targetRoot = targetChar.PrimaryPart
+    local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+    if not targetHum then return end
+
+    -- Instantly teleport to target ONCE before starting fling
+    root.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 2)
+
+    -- create fling physics
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(getgenv().FlingForce,getgenv().FlingForce,getgenv().FlingForce)
+    bv.P = getgenv().FlingPower
+    bv.Velocity = Vector3.new(0,0,0)
+    bv.Parent = root
+
+    local bav = Instance.new("BodyAngularVelocity")
+    bav.MaxTorque = Vector3.new(getgenv().FlingForce,getgenv().FlingForce,getgenv().FlingForce)
+    bav.AngularVelocity = Vector3.new(getgenv().FlingSpin,getgenv().FlingSpin,getgenv().FlingSpin)
+    bav.Parent = root
+
+    getgenv().FlingActive = true
+
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if not getgenv().FlingActive or not TargetPlayer or not TargetPlayer.Parent then
+            bv:Destroy(); bav:Destroy(); conn:Disconnect(); return
+        end
+
+        if targetHum.Health <= 0 or targetRoot.Velocity.Magnitude > VelocityThreshold then
+            getgenv().FlingActive = false
+        end
+
+        bav.AngularVelocity = Vector3.new(getgenv().FlingSpin,getgenv().FlingSpin,getgenv().FlingSpin)
+
+        -- ORIGINAL TWEEN-LIKE FLING LOGIC
+        local predictionTime = math.clamp(targetRoot.Velocity.Magnitude / 200, 0.1, 0.5)
+        local predictedPos = targetRoot.Position + targetRoot.Velocity * predictionTime
+        local offset = targetHum.MoveDirection.Magnitude>0 and targetHum.MoveDirection.Unit*3 or Vector3.new(0,0,0)
+        local direction = (predictedPos + offset - root.Position).Unit
+        bv.Velocity = direction * getgenv().FlingPower
+    end)
+
+    -- SAFE RETURN: teleport back gradually until velocity is near zero
+    spawn(function()
+        repeat task.wait(0.03) until not getgenv().FlingActive
+
+        if root and root.Parent then
+            local VELOCITY_THRESHOLD = 5 -- studs/sec, considered "stopped"
+            while root.Parent and root.AssemblyLinearVelocity.Magnitude > VELOCITY_THRESHOLD do
+                pcall(function()
+                    root.CFrame = OriginalPos
+                    root.Velocity = Vector3.new(0,0,0)
+                end)
+                task.wait(0.03)
+            end
+        end
+
+        bv:Destroy()
+        bav:Destroy()
+        if conn then conn:Disconnect() end
+    end)
+end
+
+local function EnableInstaRespawn()
+    if charAddedConn then charAddedConn:Disconnect() end
+    if charRemovingConn then charRemovingConn:Disconnect() end
+    local root, hum = getCharacterHumanoid()
+    if not root or not hum then return end
+    lastRespawnPos = root.CFrame
+    charRemovingConn = Player.CharacterRemoving:Connect(function()
+        lastRespawnPos = root.CFrame
+    end)
+    charAddedConn = Player.CharacterAdded:Connect(function(char)
+        local newRoot = char:WaitForChild("HumanoidRootPart", 5)
+        if newRoot and lastRespawnPos then
+            task.wait(0.1)
+            pcall(function() newRoot.CFrame = lastRespawnPos end)
+        end
+    end)
+end
+
+local function DisableInstaRespawn()
+    if charRemovingConn then charRemovingConn:Disconnect() end
+    if charAddedConn then charAddedConn:Disconnect() end
+    charRemovingConn = nil
+    charAddedConn = nil
+    lastRespawnPos = nil
+end
+
+local AntiVoidConn
+local lastSafeCFrame = nil
+local AntiVoidEnabled = false
+local VOID_CHECK_Y = (workspace and workspace.FallenPartsDestroyHeight) or -100
+local function startAntiVoid()
+    if AntiVoidConn then return end
+    AntiVoidConn = RunService.Heartbeat:Connect(function()
+        local char = Player.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local y = hrp.Position.Y
+        local velY = 0
+        pcall(function() velY = hrp.AssemblyLinearVelocity and hrp.AssemblyLinearVelocity.Y or (hrp.Velocity and hrp.Velocity.Y) or 0 end)
+        if y > (VOID_CHECK_Y + 10) and velY > -80 then
+            lastSafeCFrame = hrp.CFrame
+        end
+        if y <= VOID_CHECK_Y + 1 then
+            local rayOrigin = hrp.Position + Vector3.new(0, 100, 0)
+            local rayDir = Vector3.new(0, -5000, 0)
+            local params = RaycastParams.new()
+            params.FilterDescendantsInstances = {char}
+            params.FilterType = Enum.RaycastFilterType.Blacklist
+            local result = workspace:Raycast(rayOrigin, rayDir, params)
+            if result and result.Position then
+                local targetCFrame = CFrame.new(result.Position + Vector3.new(0, 5, 0))
+                pcall(function() hrp.CFrame = targetCFrame end)
+            elseif lastSafeCFrame then
+                pcall(function() hrp.CFrame = lastSafeCFrame end)
+            else
+                local spawn = workspace:FindFirstChildOfClass("SpawnLocation") or workspace:FindFirstChild("SpawnLocation")
+                if spawn and spawn:IsA("BasePart") then
+                    pcall(function() hrp.CFrame = spawn.CFrame + Vector3.new(0,5,0) end)
+                end
+            end
+            task.wait(0.2)
+        end
+    end)
+end
+local function stopAntiVoid()
+    if AntiVoidConn then
+        AntiVoidConn:Disconnect()
+        AntiVoidConn = nil
+    end
+end
+
+function EnableAntiVoid()
+    if AntiVoidEnabled then return end
+    AntiVoidEnabled = true
+    VOID_CHECK_Y = (workspace and workspace.FallenPartsDestroyHeight) or -100
+    startAntiVoid()
+    Message("AntiVoid", "Enabled anti-void rescue", 2)
+end
+function DisableAntiVoid()
+    if not AntiVoidEnabled then return end
+    AntiVoidEnabled = false
+    stopAntiVoid()
+    Message("AntiVoid", "Disabled anti-void rescue", 2)
+end
+
+local function EnableAntiFallDamage()
+    if AntiFallDamageConns[1] then AntiFallDamageConns[1]:Disconnect() end
+    if AntiFallDamageConns[2] then AntiFallDamageConns[2]:Disconnect() end
+    AntiFallDamageActive = true
+    local root, hum = getCharacterHumanoid()
+    if not root or not hum then return end
+    AntiFallDamageConns[1] = hum.StateChanged:Connect(function(old, new)
+        if new == Enum.HumanoidStateType.FallingDown or new == Enum.HumanoidStateType.Ragdoll then
+            hum:ChangeState(Enum.HumanoidStateType.Running)
+        end
+    end)
+    AntiFallDamageConns[2] = RunService.Heartbeat:Connect(function()
+        if root.Velocity.Magnitude > VelocityThreshold then
+            pcall(function()
+                root.Velocity = Vector3.new(root.Velocity.X, math.clamp(root.Velocity.Y, -100, 100), root.Velocity.Z)
+                if root.AssemblyLinearVelocity then
+                    root.AssemblyLinearVelocity = Vector3.new(root.Velocity.X, math.clamp(root.Velocity.Y, -100, 100), root.Velocity.Z)
+                end
+            end)
+        end
+    end)
+end
+
+local function DisableAntiFallDamage()
+    for _, conn in ipairs(AntiFallDamageConns) do
+        if conn then conn:Disconnect() end
+    end
+    AntiFallDamageConns = {}
+    AntiFallDamageActive = false
+end
+
+local function EnableNoDamage()
+    if NoDamageConn then NoDamageConn:Disconnect() end
+    local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    NoDamageConn = hum:GetPropertyChangedSignal("Health"):Connect(function()
+        pcall(function() hum.Health = hum.MaxHealth end)
+    end)
+end
+
+local function DisableNoDamage()
+    if NoDamageConn then NoDamageConn:Disconnect() end
+    NoDamageConn = nil
+end
+
 local Flying = false
 local ctrl = {f=0,b=0,l=0,r=0,u=0,d=0}
 local bv,bg,flyConn,hum
@@ -506,148 +507,114 @@ function DisableSpin()
     Message("Spin", "Spinning disabled.", 2)
 end
 
--- SKID FLING (INSTA-TP VERSION) WITH SAFE RETURN & ANTI-FLING RETURN LOOP
-local function SkidFlingWithSafeReturn(TargetPlayer)
-    local char = Player.Character
-    if not char or not char.PrimaryPart then return end
-    local root = char.PrimaryPart
-    local OriginalPos = root.CFrame
-
-    local targetChar = TargetPlayer.Character
-    if not targetChar or not targetChar.PrimaryPart then return end
-    local targetRoot = targetChar.PrimaryPart
-    local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
-    if not targetHum then return end
-
-    -- Instantly teleport to target ONCE before starting fling
-    root.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 2)
-
-    -- create fling physics
-    local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(getgenv().FlingForce,getgenv().FlingForce,getgenv().FlingForce)
-    bv.P = getgenv().FlingPower
-    bv.Velocity = Vector3.new(0,0,0)
-    bv.Parent = root
-
-    local bav = Instance.new("BodyAngularVelocity")
-    bav.MaxTorque = Vector3.new(getgenv().FlingForce,getgenv().FlingForce,getgenv().FlingForce)
-    bav.AngularVelocity = Vector3.new(getgenv().FlingSpin,getgenv().FlingSpin,getgenv().FlingSpin)
-    bav.Parent = root
-
-    getgenv().FlingActive = true
-
-    local conn
-    conn = RunService.Heartbeat:Connect(function()
-        if not getgenv().FlingActive or not TargetPlayer or not TargetPlayer.Parent then
-            bv:Destroy(); bav:Destroy(); conn:Disconnect(); return
+local function LoopGoto(target)
+    if loopGotoConn then loopGotoConn:Disconnect() end
+    local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    if not root or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then return end
+    loopGotoConn = RunService.Heartbeat:Connect(function()
+        if target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+            pcall(function()
+                root.CFrame = target.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0)
+            end)
+        else
+            loopGotoConn:Disconnect()
+            loopGotoConn = nil
         end
-
-        if targetHum.Health <= 0 or targetRoot.Velocity.Magnitude > VelocityThreshold then
-            getgenv().FlingActive = false
-        end
-
-        bav.AngularVelocity = Vector3.new(getgenv().FlingSpin,getgenv().FlingSpin,getgenv().FlingSpin)
-
-        -- ORIGINAL TWEEN-LIKE FLING LOGIC
-        local predictionTime = math.clamp(targetRoot.Velocity.Magnitude / 200, 0.1, 0.5)
-        local predictedPos = targetRoot.Position + targetRoot.Velocity * predictionTime
-        local offset = targetHum.MoveDirection.Magnitude>0 and targetHum.MoveDirection.Unit*3 or Vector3.new(0,0,0)
-        local direction = (predictedPos + offset - root.Position).Unit
-        bv.Velocity = direction * getgenv().FlingPower
-    end)
-
-    -- SAFE RETURN: teleport back gradually until velocity is near zero
-    spawn(function()
-        repeat task.wait(0.03) until not getgenv().FlingActive
-
-        if root and root.Parent then
-            local VELOCITY_THRESHOLD = 5 -- studs/sec, considered "stopped"
-            while root.Parent and root.AssemblyLinearVelocity.Magnitude > VELOCITY_THRESHOLD do
-                pcall(function()
-                    root.CFrame = OriginalPos
-                    root.Velocity = Vector3.new(0,0,0)
-                end)
-                task.wait(0.03)
-            end
-        end
-
-        bv:Destroy()
-        bav:Destroy()
-        if conn then conn:Disconnect() end
     end)
 end
 
--- ANTI-VOID MODULE
-local AntiVoidConn
-local lastSafeCFrame = nil
-local AntiVoidEnabled = false
-local VOID_CHECK_Y = (workspace and workspace.FallenPartsDestroyHeight) or -100
-local function startAntiVoid()
-    if AntiVoidConn then return end
-    AntiVoidConn = RunService.Heartbeat:Connect(function()
+local function StopLoopGoto()
+    if loopGotoConn then loopGotoConn:Disconnect() end
+    loopGotoConn = nil
+end
+
+local function EnableNoclip()
+    if NoclipConn then NoclipConn:Disconnect() end
+    NoclipConn = RunService.Stepped:Connect(function()
         local char = Player.Character
-        if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-        local y = hrp.Position.Y
-        local velY = 0
-        pcall(function() velY = hrp.AssemblyLinearVelocity and hrp.AssemblyLinearVelocity.Y or (hrp.Velocity and hrp.Velocity.Y) or 0 end)
-        if y > (VOID_CHECK_Y + 10) and velY > -80 then
-            lastSafeCFrame = hrp.CFrame
-        end
-        if y <= VOID_CHECK_Y + 1 then
-            local rayOrigin = hrp.Position + Vector3.new(0, 100, 0)
-            local rayDir = Vector3.new(0, -5000, 0)
-            local params = RaycastParams.new()
-            params.FilterDescendantsInstances = {char}
-            params.FilterType = Enum.RaycastFilterType.Blacklist
-            local result = workspace:Raycast(rayOrigin, rayDir, params)
-            if result and result.Position then
-                local targetCFrame = CFrame.new(result.Position + Vector3.new(0, 5, 0))
-                pcall(function() hrp.CFrame = targetCFrame end)
-            elseif lastSafeCFrame then
-                pcall(function() hrp.CFrame = lastSafeCFrame end)
-            else
-                local spawn = workspace:FindFirstChildOfClass("SpawnLocation") or workspace:FindFirstChild("SpawnLocation")
-                if spawn and spawn:IsA("BasePart") then
-                    pcall(function() hrp.CFrame = spawn.CFrame + Vector3.new(0,5,0) end)
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
                 end
             end
-            task.wait(0.2)
         end
     end)
 end
-local function stopAntiVoid()
-    if AntiVoidConn then
-        AntiVoidConn:Disconnect()
-        AntiVoidConn = nil
-    end
-end
-function EnableAntiVoid()
-    if AntiVoidEnabled then return end
-    AntiVoidEnabled = true
-    VOID_CHECK_Y = (workspace and workspace.FallenPartsDestroyHeight) or -100
-    startAntiVoid()
-    Message("AntiVoid", "Enabled anti-void rescue", 2)
-end
-function DisableAntiVoid()
-    if not AntiVoidEnabled then return end
-    AntiVoidEnabled = false
-    stopAntiVoid()
-    Message("AntiVoid", "Disabled anti-void rescue", 2)
+
+local function DisableNoclip()
+    if NoclipConn then NoclipConn:Disconnect() end
+    NoclipConn = nil
 end
 
--- === CHAT HANDLER, NOW TOP-LEVEL ===
-function HandleChat(p,msg)
+local function CmdStatus()
+    local status = {
+        "FlingActive: " .. tostring(getgenv().FlingActive),
+        "KissActive: " .. tostring(getgenv().KissActive),
+        "AntiVoid: " .. tostring(AntiVoidEnabled),
+        "AntiFallDamage: " .. tostring(AntiFallDamageActive),
+        "Flying: " .. tostring(Flying)
+    }
+    Message("CmdStatus", table.concat(status, ", "), 5)
+end
+
+local function FlingStatus()
+    Message("FlingStatus", "Force: " .. getgenv().FlingForce .. ", Spin: " .. getgenv().FlingSpin .. ", Power: " .. getgenv().FlingPower, 5)
+end
+
+local function SendIYCommand(cmd)
+    -- Placeholder for Infinite Yield compatibility
+end
+
+-- === CHAT HANDLER ===
+function HandleChat(p, msg, showNotifications)
     if not p or not msg then return end
-    if not getgenv().Whitelisted[p.Name] and p~=Player then return end
-    msg=msg:lower()
-    local args={}
-    for word in msg:gmatch("%S+") do table.insert(args,word) end
-    local cmd=args[1]
 
-    if cmd == ".textbox" then OpenTextbox() Message("Textbox", "Textbox opened. Type commands here!", 2) return end
-    if cmd == ".untextbox" then CloseTextbox() Message("Textbox", "Textbox closed.", 2) return end
+    -- Deduplicate messages using a simple key
+    local messageKey = tostring(p.UserId) .. ":" .. msg
+    if processedMessages[messageKey] then return end
+    processedMessages[messageKey] = true
+    spawn(function()
+        task.wait(2)
+        processedMessages[messageKey] = nil
+    end)
+
+    -- Only process messages starting with "." for command checks
+    if msg:sub(1, 1) == "." then
+        -- Show permission denied notification for non-whitelisted players (except local player)
+        if not getgenv().Whitelisted[p.Name] and p ~= Player then
+            if showNotifications then
+                Message("Nullen Hub", "You do not have permission to use this command.", 3)
+            end
+            return
+        end
+    else
+        -- Non-command messages from non-whitelisted players are ignored
+        if not getgenv().Whitelisted[p.Name] and p ~= Player then
+            return
+        end
+    end
+
+    -- Process commands for whitelisted players or local player
+    msg = msg:lower()
+    local args = {}
+    for word in msg:gmatch("%S+") do table.insert(args, word) end
+    local cmd = args[1]
+
+    if cmd == ".textbox" then
+        OpenTextbox()
+        if showNotifications then
+            Message("Textbox", "Textbox opened. Type commands here!", 2)
+        end
+        return
+    end
+    if cmd == ".untextbox" then
+        CloseTextbox()
+        if showNotifications then
+            Message("Textbox", "Textbox closed.", 2)
+        end
+        return
+    end
 
     if cmd == ".join" and args[2] then
         local input = args[2]:gsub("%s+", "")
@@ -655,9 +622,13 @@ function HandleChat(p,msg)
         local jobId = input:match("gameInstanceId=([%w%-]+)") or input:match("jobId=([%w%-]+)")
         if placeId and jobId then
             pcall(function() TeleportService:TeleportToPlaceInstance(placeId, jobId, Player) end)
-            Message("Join", "Teleporting to Job "..jobId, 3)
+            if showNotifications then
+                Message("Join", "Teleporting to Job "..jobId, 3)
+            end
         else
-            Message("Join", "Invalid link format! Use roblox://placeId=123&gameInstanceId=abc", 5)
+            if showNotifications then
+                Message("Join", "Invalid link format! Use roblox://placeId=123&gameInstanceId=abc", 5)
+            end
         end
         return
     end
@@ -665,7 +636,9 @@ function HandleChat(p,msg)
     if cmd == ".stopvel" or cmd == ".stopvelocity" or cmd == ".breakvelocity" or cmd == ".0velocity" then
         local dur = tonumber(args[2]) or 0.7
         StopVelocity(dur)
-        Message("StopVel", "Stopped velocity for " .. tostring(dur) .. "s", 2)
+        if showNotifications then
+            Message("StopVel", "Stopped velocity for " .. tostring(dur) .. "s", 2)
+        end
         return
     end
     if cmd == ".cancelvel" then
@@ -676,36 +649,283 @@ function HandleChat(p,msg)
     if cmd == ".config" and args[2] then
         local name = args[2]:lower()
         local cfg = getgenv().Configs[name]
-        if not cfg and getclipboard then
+        if not cfg and type(getclipboard) == "function" then
             local text = getclipboard()
             local success, loaded = pcall(function() return game:GetService("HttpService"):JSONDecode(text:match("return%s+(.+)")) end)
             if success and loaded then
                 cfg = loaded
                 getgenv().Configs[name] = cfg
-                Message("Config", "Config '"..name.."' loaded from clipboard!", 3)
+                if showNotifications then
+                    Message("Config", "Config '"..name.."' loaded from clipboard!", 3)
+                end
             end
         end
         if cfg then
             ApplyConfig(cfg)
-            Message("Config", "Config '"..name.."' applied!", 3)
+            if showNotifications then
+                Message("Config", "Config '"..name.."' applied!", 3)
+            end
         else
-            Message("Config", "Config '"..name.."' not found!", 2)
+            if showNotifications then
+                Message("Config", "Config '"..name.."' not found!", 2)
+            end
         end
         return
     end
 
-    if cmd == ".cmdstatus" then CmdStatus() return end
-    if cmd == ".flingstatus" then FlingStatus() return end
+    if cmd == ".love" and args[2] then
+        local target = FindPlayer(args[2])
+        if target then
+            getgenv().LoveList[target.Name:lower()] = true
+            if showNotifications then
+                Message("Love", target.DisplayName .. " added to your LoveList ❤️", 3)
+            end
+        else
+            if showNotifications then
+                Message("Love", "Player '" .. args[2] .. "' not found!", 3)
+            end
+        end
+        return
+    end
+
+    if cmd == ".unlove" and args[2] then
+        local target = FindPlayer(args[2])
+        local name = args[2]:lower()
+        if getgenv().LoveList[name] then
+            getgenv().LoveList[name] = nil
+            if showNotifications then
+                Message("Love", (target and target.DisplayName or name) .. " removed from your LoveList 💔", 3)
+            end
+        else
+            if showNotifications then
+                Message("Love", "Player '" .. name .. "' is not in your LoveList!", 3)
+            end
+        end
+        return
+    end
+
+    if cmd == ".kiss" then
+        if p == Player then
+            if showNotifications then
+                Message("Love", "You can't kiss yourself!", 2)
+            end
+            return
+        end
+        if getgenv().KissActive then return end
+        local myChar = Player.Character
+        local theirChar = p.Character
+        if myChar and theirChar then
+            local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+            local theirRoot = theirChar:FindFirstChild("HumanoidRootPart")
+            local myHum = myChar:FindFirstChildOfClass("Humanoid")
+            if myRoot and theirRoot and myHum then
+                getgenv().KissActive = true
+                if getgenv().KissConn then
+                    getgenv().KissConn:Disconnect()
+                    getgenv().KissConn = nil
+                end
+                getgenv().KissOriginalWalkSpeed = myHum.WalkSpeed
+                getgenv().KissOriginalJumpPower = myHum.JumpPower
+                local originalAnchored = myRoot.Anchored
+                local kissStartTime = tick()
+                local kissDuration = 2.2
+                local moveDuration = 0.5
+                local initialWait = 0.2
+                myHum.WalkSpeed = 0
+                myHum.JumpPower = 0
+                local targetCFrame = theirRoot.CFrame
+                local startPos = targetCFrame * CFrame.new(0, 0, -2.2)
+                local closePos = targetCFrame * CFrame.new(0, 0, -1.2)
+                local lookAtCFrame = CFrame.new(startPos.Position, targetCFrame.Position)
+                pcall(function()
+                    myRoot.Anchored = true
+                    myRoot.CFrame = lookAtCFrame
+                    task.wait(0.05)
+                    myRoot.Anchored = originalAnchored
+                end)
+                getgenv().KissBodyVel = Instance.new("BodyVelocity")
+                getgenv().KissBodyVel.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+                getgenv().KissBodyVel.Velocity = Vector3.new(0, 0, 0)
+                getgenv().KissBodyVel.Parent = myRoot
+                getgenv().KissBodyGyro = Instance.new("BodyGyro")
+                getgenv().KissBodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+                getgenv().KissBodyGyro.P = 20000
+                getgenv().KissBodyGyro.D = 2000
+                getgenv().KissBodyGyro.Parent = myRoot
+                getgenv().KissConn = RunService.Heartbeat:Connect(function()
+                    if not getgenv().KissActive or not theirChar or not theirChar.Parent or not theirRoot or not theirRoot.Parent then
+                        if getgenv().KissConn then
+                            getgenv().KissConn:Disconnect()
+                            getgenv().KissConn = nil
+                        end
+                        if myRoot and myRoot.Parent then
+                            pcall(function()
+                                safeDestroy(getgenv().KissBodyVel)
+                                safeDestroy(getgenv().KissBodyGyro)
+                                getgenv().KissBodyVel = nil
+                                getgenv().KissBodyGyro = nil
+                                myHum.WalkSpeed = getgenv().KissOriginalWalkSpeed or 16
+                                myHum.JumpPower = getgenv().KissOriginalJumpPower or 50
+                                myRoot.Velocity = Vector3.new(0, 0, 0)
+                                if myRoot.AssemblyLinearVelocity then
+                                    myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                end
+                                getgenv().KissActive = false
+                                getgenv().KissOriginalWalkSpeed = nil
+                                getgenv().KissOriginalJumpPower = nil
+                            end)
+                        end
+                        if showNotifications and getgenv().KissActive then
+                            Message("Love", "Kiss ended! 💋", 2)
+                        end
+                        getgenv().KissActive = false
+                        return
+                    end
+                    local elapsed = tick() - kissStartTime
+                    if elapsed > kissDuration then
+                        if getgenv().KissConn then
+                            getgenv().KissConn:Disconnect()
+                            getgenv().KissConn = nil
+                        end
+                        if myRoot and myRoot.Parent then
+                            pcall(function()
+                                safeDestroy(getgenv().KissBodyVel)
+                                safeDestroy(getgenv().KissBodyGyro)
+                                getgenv().KissBodyVel = nil
+                                getgenv().KissBodyGyro = nil
+                                myHum.WalkSpeed = getgenv().KissOriginalWalkSpeed or 16
+                                myHum.JumpPower = getgenv().KissOriginalJumpPower or 50
+                                myRoot.Velocity = Vector3.new(0, 0, 0)
+                                if myRoot.AssemblyLinearVelocity then
+                                    myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                end
+                                getgenv().KissActive = false
+                                getgenv().KissOriginalWalkSpeed = nil
+                                getgenv().KissOriginalJumpPower = nil
+                            end)
+                        end
+                        if showNotifications then
+                            Message("Love", "Kiss ended! 💋", 2)
+                        end
+                        getgenv().KissActive = false
+                        return
+                    end
+                    local targetCFrame = theirRoot.CFrame
+                    local startPos = targetCFrame * CFrame.new(0, 0, -2.2)
+                    local closePos = targetCFrame * CFrame.new(0, 0, -1.2)
+                    local currentPos
+                    if elapsed < initialWait then
+                        currentPos = startPos
+                    elseif elapsed < initialWait + moveDuration then
+                        local t = (elapsed - initialWait) / moveDuration
+                        currentPos = startPos:Lerp(closePos, t)
+                    elseif elapsed < initialWait + 2 * moveDuration then
+                        local t = (elapsed - initialWait - moveDuration) / moveDuration
+                        currentPos = closePos:Lerp(startPos, t)
+                    else
+                        currentPos = startPos
+                    end
+                    local lookAtCFrame = CFrame.new(currentPos.Position, targetCFrame.Position)
+                    pcall(function()
+                        myRoot.CFrame = lookAtCFrame
+                        getgenv().KissBodyGyro.CFrame = lookAtCFrame
+                        myRoot.Velocity = Vector3.new(0, 0, 0)
+                        if myRoot.AssemblyLinearVelocity then
+                            myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        end
+                    end)
+                end)
+                if showNotifications and getgenv().KissActive then
+                    Message("Love", p.DisplayName .. " kissed you! 💋😘", 3)
+                end
+            else
+                if showNotifications then
+                    Message("Love", "Missing character parts!", 2)
+                end
+                getgenv().KissActive = false
+            end
+        else
+            if showNotifications then
+                Message("Love", "Character not found!", 2)
+            end
+            getgenv().KissActive = false
+        end
+        return
+    end
+
+    if cmd == ".unkiss" then
+        if getgenv().KissConn then
+            getgenv().KissConn:Disconnect()
+            getgenv().KissConn = nil
+        end
+        local myChar = Player.Character
+        if myChar then
+            local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+            local myHum = myChar:FindFirstChildOfClass("Humanoid")
+            if myRoot and myHum then
+                pcall(function()
+                    safeDestroy(getgenv().KissBodyVel)
+                    safeDestroy(getgenv().KissBodyGyro)
+                    getgenv().KissBodyVel = nil
+                    getgenv().KissBodyGyro = nil
+                    myHum.WalkSpeed = getgenv().KissOriginalWalkSpeed or 16
+                    myHum.JumpPower = getgenv().KissOriginalJumpPower or 50
+                    myHum.PlatformStand = false
+                    myRoot.Anchored = false
+                    myRoot.Velocity = Vector3.new(0, 0, 0)
+                    if myRoot.AssemblyLinearVelocity then
+                        myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    end
+                    getgenv().KissActive = false
+                    getgenv().KissOriginalWalkSpeed = nil
+                    getgenv().KissOriginalJumpPower = nil
+                end)
+            end
+        end
+        if showNotifications then
+            Message("Love", "Kiss stopped! 💔", 2)
+        end
+        getgenv().KissActive = false
+        return
+    end
+
+    if cmd == ".punish" then
+        local myHum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+        if myHum then
+            myHum.Health = 0
+            if showNotifications then
+                Message("Love", p.DisplayName .. " playfully punished you! 💥", 3)
+            end
+        else
+            if showNotifications then
+                Message("Love", "Couldn't reset (no humanoid found).", 2)
+            end
+        end
+        return
+    end
+
+    if cmd == ".cmdstatus" then
+        CmdStatus()
+        return
+    end
+    if cmd == ".flingstatus" then
+        FlingStatus()
+        return
+    end
 
     if cmd == ".createconfig" and args[2] then
         local name = args[2]:lower()
         local cfg = CollectConfig()
         getgenv().Configs[name] = cfg
-        if setclipboard then
+        if type(setclipboard) == "function" then
             setclipboard("return " .. game:GetService("HttpService"):JSONEncode(cfg))
-            Message("Config", "Config '"..name.."' saved and copied to clipboard!", 3)
+            if showNotifications then
+                Message("Config", "Config '"..name.."' saved and copied to clipboard!", 3)
+            end
         else
-            Message("Config", "Config '"..name.."' saved locally!", 3)
+            if showNotifications then
+                Message("Config", "Config '"..name.."' saved locally!", 3)
+            end
         end
         return
     end
@@ -713,213 +933,290 @@ function HandleChat(p,msg)
     if cmd == ".listconfigs" then
         local names = {}
         for k in pairs(getgenv().Configs) do table.insert(names, k) end
-        Message("Configs", "Configs: " .. table.concat(names, ", "), 5)
+        if showNotifications then
+            Message("Configs", "Configs: " .. table.concat(names, ", "), 5)
+        end
         return
     end
 
-    if cmd == ".antivoid" then EnableAntiVoid() return end
-    if cmd == ".unantivoid" then DisableAntiVoid() return end
+    if cmd == ".antivoid" then
+        EnableAntiVoid()
+        return
+    end
+    if cmd == ".unantivoid" then
+        DisableAntiVoid()
+        return
+    end
 
-    if cmd == ".antifalldamage" then EnableAntiFallDamage() return end
-    if cmd == ".unantifalldamage" then DisableAntiFallDamage() return end
+    if cmd == ".antifalldamage" then
+        EnableAntiFallDamage()
+        return
+    end
+    if cmd == ".unantifalldamage" then
+        DisableAntiFallDamage()
+        return
+    end
 
-    if cmd==".fling" and args[2] then
+    if cmd == ".fling" and args[2] then
         local targetName = args[2]
         local target
-        if targetName=="all" then
-            for _,plr in ipairs(Players:GetPlayers()) do
+        if targetName == "all" then
+            for _, plr in ipairs(Players:GetPlayers()) do
                 if plr ~= Player then SkidFlingWithSafeReturn(plr) end
             end
-        elseif targetName=="random" then
+        elseif targetName == "random" then
             local list = {}
-            for _,plr in ipairs(Players:GetPlayers()) do if plr ~= Player then table.insert(list,plr) end end
+            for _, plr in ipairs(Players:GetPlayers()) do if plr ~= Player then table.insert(list, plr) end end
             target = list[math.random(#list)]
             if target then SkidFlingWithSafeReturn(target) end
         else
             target = FindPlayer(targetName)
             if target then SkidFlingWithSafeReturn(target)
-            else Message("Fling","Target not found",2) end
-        end
-        return
-    elseif cmd==".unfling" then
-        getgenv().FlingActive=false
-        Message("Fling","Fling stopped",2)
-        return
-    end
-
-    if cmd==".flingforce" and args[2] then getgenv().FlingForce=tonumber(args[2]) Message("FlingForce","Current: "..getgenv().FlingForce,2) return end
-    if cmd==".flingspin" and args[2] then getgenv().FlingSpin=tonumber(args[2]) Message("FlingSpin","Current: "..getgenv().FlingSpin,2) return end
-    if cmd==".flingpower" and args[2] then getgenv().FlingPower=tonumber(args[2]) Message("FlingPower","Current: "..getgenv().FlingPower,2) return end
-
-    if cmd==".walkfling" then StartWalkFling() Message("WalkFling","Started!",2) SendIYCommand(";walkfling") return end
-    if cmd==".unwalkfling" then StopWalkFling() Message("WalkFling","Stopped!",2) SendIYCommand(";unwalkfling") return end
-
-    if cmd == ".instarespawn" then EnableInstaRespawn() return end
-    if cmd == ".uninstarespawn" then DisableInstaRespawn() return end
-
-    if cmd == ".fov" and args[2] then Workspace.CurrentCamera.FieldOfView = tonumber(args[2]) Message("FOV", "Set to "..args[2], 2) return end
-
-    if cmd == ".nodamage" then EnableNoDamage() return end
-    if cmd == ".damage" then DisableNoDamage() return end
-
-    if cmd==".wl" and args[2] then
-        if args[2]=="all" then
-            for _,plr in ipairs(Players:GetPlayers()) do getgenv().Whitelisted[plr.Name]=true end
-            Message("Whitelist","All players whitelisted",2)
-        else
-            for _,plr in ipairs(Players:GetPlayers()) do
-                if plr.Name:lower():find(args[2]:lower()) or plr.DisplayName:lower():find(args[2]:lower()) then
-                    getgenv().Whitelisted[plr.Name]=true
-                    Message("Whitelist","Whitelisted "..plr.Name,2)
+            else
+                if showNotifications then
+                    Message("Fling", "Target not found", 2)
                 end
             end
         end
         return
-		
-    elseif cmd==".unwl" and args[2] then
-    local input = args[2]:lower()
-    if input == "all" then
-        for plrName in pairs(getgenv().Whitelisted) do
-            getgenv().Whitelisted[plrName] = nil
+    elseif cmd == ".unfling" then
+        getgenv().FlingActive = false
+        if showNotifications then
+            Message("Fling", "Fling stopped", 2)
         end
-        Message("Whitelist","Removed all players from whitelist",2)
-    else
-        for _,plr in ipairs(Players:GetPlayers()) do
-            if plr.Name:lower():find(input) or plr.DisplayName:lower():find(input) then
-                getgenv().Whitelisted[plr.Name]=nil
-                Message("Whitelist","Removed "..plr.Name,2)
+        return
+    end
+
+    if cmd == ".flingforce" and args[2] then
+        getgenv().FlingForce = tonumber(args[2])
+        if showNotifications then
+            Message("FlingForce", "Current: "..getgenv().FlingForce, 2)
+        end
+        return
+    end
+    if cmd == ".flingspin" and args[2] then
+        getgenv().FlingSpin = tonumber(args[2])
+        if showNotifications then
+            Message("FlingSpin", "Current: "..getgenv().FlingSpin, 2)
+        end
+        return
+    end
+    if cmd == ".flingpower" and args[2] then
+        getgenv().FlingPower = tonumber(args[2])
+        if showNotifications then
+            Message("FlingPower", "Current: "..getgenv().FlingPower, 2)
+        end
+        return
+    end
+
+    if cmd == ".walkfling" then
+        StartWalkFling()
+        if showNotifications then
+            Message("WalkFling", "Started!", 2)
+        end
+        SendIYCommand(";walkfling")
+        return
+    end
+    if cmd == ".unwalkfling" then
+        StopWalkFling()
+        if showNotifications then
+            Message("WalkFling", "Stopped!", 2)
+        end
+        SendIYCommand(";unwalkfling")
+        return
+    end
+
+    if cmd == ".instarespawn" then
+        EnableInstaRespawn()
+        return
+    end
+    if cmd == ".uninstarespawn" then
+        DisableInstaRespawn()
+        return
+    end
+
+    if cmd == ".fov" and args[2] then
+        Workspace.CurrentCamera.FieldOfView = tonumber(args[2])
+        if showNotifications then
+            Message("FOV", "Set to "..args[2], 2)
+        end
+        return
+    end
+
+    if cmd == ".nodamage" then
+        EnableNoDamage()
+        return
+    end
+    if cmd == ".damage" then
+        DisableNoDamage()
+        return
+    end
+
+    if cmd == ".wl" and args[2] then
+        if args[2] == "all" then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                getgenv().Whitelisted[plr.Name] = true
+            end
+            if showNotifications then
+                Message("Whitelist", "All players whitelisted", 2)
+            end
+        else
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr.Name:lower():find(args[2]:lower()) or plr.DisplayName:lower():find(args[2]:lower()) then
+                    getgenv().Whitelisted[plr.Name] = true
+                    if showNotifications then
+                        Message("Whitelist", "Whitelisted "..plr.Name, 2)
+                    end
+                end
             end
         end
+        return
+    elseif cmd == ".unwl" and args[2] then
+        if args[2]:lower() == "all" then
+            local localPlayerName = Player.Name
+            local clearedCount = 0
+            for name, _ in pairs(getgenv().Whitelisted) do
+                if name ~= localPlayerName then
+                    getgenv().Whitelisted[name] = nil
+                    clearedCount = clearedCount + 1
+                end
+            end
+            if showNotifications then
+                Message("Whitelist", "Cleared " .. clearedCount .. " players from whitelist (kept local player)", 2)
+            end
+        else
+            local found = false
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr.Name:lower():find(args[2]:lower()) or plr.DisplayName:lower():find(args[2]:lower()) then
+                    if plr.Name ~= Player.Name then
+                        getgenv().Whitelisted[plr.Name] = nil
+                        if showNotifications then
+                            Message("Whitelist", "Removed "..plr.Name, 2)
+                        end
+                        found = true
+                    else
+                        if showNotifications then
+                            Message("Whitelist", "Cannot unwhitelist yourself!", 2)
+                        end
+                    end
+                end
+            end
+            if not found and showNotifications then
+                Message("Whitelist", "No players found matching '"..args[2].."'", 2)
+            end
+        end
+        return
     end
-    return
-end
 
+    if cmd == ".listwl" then
+        local wl = {}
+        for name, _ in pairs(getgenv().Whitelisted) do table.insert(wl, name) end
+        if showNotifications then
+            Message("Whitelist", "Whitelisted: " .. table.concat(wl, ", "), 5)
+        end
+        return
+    end
 
     if (cmd == ".jumppower" or cmd == ".jp") and args[2] then
         local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
         if hum then
             hum.UseJumpPower = true
             hum.JumpPower = tonumber(args[2])
-            Message("JumpPower", "Set to " .. args[2], 2)
+            if showNotifications then
+                Message("JumpPower", "Set to "..args[2], 2)
+            end
         end
         return
     end
 
-    if cmd==".fly" then StartFly(tonumber(args[2]) or 85) Message("Fly","Enabled",2) return end
-    if cmd==".unfly" then StopFly() Message("Fly","Disabled",2) return end
-    if cmd==".speed" and args[2] then
-        local val=tonumber(args[2])
-        local hum=Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
-        if hum then hum.WalkSpeed=val; Message("Speed","Set to "..val,2) end
+    if cmd == ".fly" then
+        StartFly(tonumber(args[2]) or 85)
+        if showNotifications then
+            Message("Fly", "Enabled", 2)
+        end
+        return
+    end
+    if cmd == ".unfly" then
+        StopFly()
+        if showNotifications then
+            Message("Fly", "Disabled", 2)
+        end
+        return
+    end
+    if cmd == ".speed" and args[2] then
+        local val = tonumber(args[2])
+        local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.WalkSpeed = val
+            if showNotifications then
+                Message("Speed", "Set to "..val, 2)
+            end
+        end
         return
     end
 
-    if cmd == ".spin" then EnableSpin(args[2]) return end
-    if cmd == ".unspin" then DisableSpin() return end
+    if cmd == ".spin" then
+        EnableSpin(args[2])
+        return
+    end
+    if cmd == ".unspin" then
+        DisableSpin()
+        return
+    end
 
     if cmd == ".loopgoto" and args[2] then
         local target = FindPlayer(args[2])
         if target then
             LoopGoto(target)
-            Message("LoopGoto", "Looping to " .. target.DisplayName, 2)
-        else
-            Message("LoopGoto", "Player not found", 2)
-        end
-        return
-
-    elseif cmd == ".unloopgoto" then
-        StopLoopGoto()
-        Message("LoopGoto", "Stopped loopgoto", 2)
-        return
-    end
-
-    if cmd == ".noclip" then EnableNoclip() return end
-    if cmd == ".clip" then DisableNoclip() return end
-
-	if cmd == ".namelessadmin" then
-    Message("Loader", "Loading NamelessAdmin...", 2)
-    local ok, err = pcall(function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/Nameless-Admin/main/Source.lua"))()
-    end)
-    if not ok then Message("Loader", "Error: "..tostring(err), 3) end
-    return
-end
-
-if cmd == ".infyield" then
-    Message("Loader", "Loading Infinite Yield...", 2)
-    local ok, err = pcall(function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
-    end)
-    if not ok then Message("Loader", "Error: "..tostring(err), 3) end
-    return
-end
-
-if cmd == ".bypasser" then
-    Message("Loader", "Loading Bypasser...", 2)
-    local ok, err = pcall(function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/fearlessd3v/TEAM-FEARLESS/refs/heads/main/fearless-chat-bypass"))()
-    end)
-    if not ok then Message("Loader", "Error: "..tostring(err), 3) end
-    return
-end
-
-if cmd == ".mm2" then
-    Message("Loader", "Loading MM2 loader...", 2)
-    local ok, err = pcall(function()
-        loadstring(game:HttpGet('https://raw.githubusercontent.com/thunderXhub/ThunderXHUB/refs/heads/main/loader'))()
-    end)
-    if not ok then Message("Loader", "Error: "..tostring(err), 3) end
-    return
-end
-
-
-if cmd == ".goto" and args[2] then
-    local target
-
-    -- Check for random teleport
-    if args[2]:lower() == "random" then
-        local allPlayers = Players:GetPlayers()
-        if #allPlayers > 1 then
-            repeat
-                target = allPlayers[math.random(1, #allPlayers)]
-            until target ~= p  -- make sure you don't teleport to yourself
-        end
-    else
-        target = FindPlayer(args[2])
-    end
-
-    -- Teleport if valid target found
-    if target and target.Character then
-        local root = target.Character:FindFirstChild("HumanoidRootPart")
-        if root and p.Character then
-            local charRoot = p.Character:FindFirstChild("HumanoidRootPart")
-            if charRoot then
-                charRoot.CFrame = root.CFrame + Vector3.new(0, 3, 0)
-                Message("Goto", "Teleported to " .. target.Name, 2)
+            if showNotifications then
+                Message("LoopGoto", "Looping to "..target.DisplayName, 2)
             end
         else
-            Message("Goto", "Target HumanoidRootPart not found.", 2)
+            if showNotifications then
+                Message("LoopGoto", "Player not found", 2)
+            end
         end
-    else
-        Message("Goto", "Player not found.", 2)
-    end
-    return
-end
-
-    if cmd==".tptool" then
-        local mouse=Player:GetMouse()
-        local tool=Instance.new("Tool")
-        tool.RequiresHandle=false
-        tool.Name="TP Tool (Click TP)"
-        tool.Activated:Connect(function()
-            local pos=mouse.Hit+Vector3.new(0,2.5,0)
-            Player.Character.HumanoidRootPart.CFrame=CFrame.new(pos.X,pos.Y,pos.Z)
-        end)
-        tool.Parent=Player.Backpack
-        Message("TP Tool","Added to backpack",2)
+        return
+    elseif cmd == ".unloopgoto" then
+        StopLoopGoto()
+        if showNotifications then
+            Message("LoopGoto", "Stopped loopgoto", 2)
+        end
         return
     end
 
+    if cmd == ".noclip" then
+        EnableNoclip()
+        return
+    end
+    if cmd == ".clip" then
+        DisableNoclip()
+        return
+    end
+
+    if cmd == ".goto" and args[2] then
+        local target = FindPlayer(args[2])
+        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+            Player.Character.HumanoidRootPart.CFrame = target.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0)
+        end
+        return
+    end
+
+    if cmd == ".tptool" then
+        local mouse = Player:GetMouse()
+        local tool = Instance.new("Tool")
+        tool.RequiresHandle = false
+        tool.Name = "TP Tool (Click TP)"
+        tool.Activated:Connect(function()
+            local pos = mouse.Hit + Vector3.new(0, 2.5, 0)
+            Player.Character.HumanoidRootPart.CFrame = CFrame.new(pos.X, pos.Y, pos.Z)
+        end)
+        tool.Parent = Player.Backpack
+        if showNotifications then
+            Message("TP Tool", "Added to backpack", 2)
+        end
+        return
+    end
 end
 
 -- === CHAT HOOK FUNCTION ===
@@ -944,4 +1241,5 @@ local function HookChat()
 end
 
 HookChat()
+
 
